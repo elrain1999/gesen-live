@@ -1,6 +1,7 @@
 const {setTimeout:delay}=require('node:timers/promises');
 const {request,failure,APIError}=require('./http.cjs');
 
+const dailySearchLimit=80;
 const kinds=['live','upcoming','archive'];
 const quotaDay=now=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(now));
 const handle=value=>String(value||'').normalize('NFC').toLowerCase();
@@ -14,7 +15,7 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
   let fatal;
   let nextSearchAt=0;
   return async function api(resource,params,record,runLimit=Infinity) {
-    const stats=telemetry.endpoints[resource]??={requests:0,rate_limits:0,retries:0};
+    const stats=telemetry.endpoints[resource]??={requests:0,rate_limits:0,retries:0,succeeded:0,failed:0,retry_succeeded:0};
     const defer=Date.parse(next.cooldowns[resource]?.until);
     if(fatal)throw deferred(fatal);
     if(blocked.has(resource))throw deferred(blocked.get(resource));
@@ -27,11 +28,11 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
       error.category=stored.category;error.endpoint=resource;
       throw deferred(error);
     }
-    if(record&&(next.search_used>=80||telemetry.search_requests>=runLimit))return null;
+    if(record&&(next.search_used>=dailySearchLimit||telemetry.search_requests>=runLimit))return null;
     const isSearch=resource==='search';
     const retries=retried.has(resource)?0:isSearch?1:2;
     for(let retry=0;;retry++){
-      if(record&&(next.search_used>=80||telemetry.search_requests>=runLimit))return null;
+      if(record&&(next.search_used>=dailySearchLimit||telemetry.search_requests>=runLimit))return null;
       if(resource==='search'){
         next.search_used++;telemetry.search_requests++;
       }else{
@@ -49,10 +50,18 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
         const data=await request('https://www.googleapis.com/youtube/v3/'+resource+'?'+new URLSearchParams({...params,key}),{fetcher,telemetry,clock});
         if(!Array.isArray(data?.items))throw new APIError('API_INVALID_SHAPE');
         if(record)next.searched.push(record);
-        if(retry)telemetry.recovered++;
+        stats.succeeded++;
+        if(retry){stats.retry_succeeded++;telemetry.recovered++;}
         delete next.cooldowns[resource];
         return data;
       }catch(error){
+        stats.failed++;
+        let rateEvent;
+        if(error.status===429){
+          rateEvent={method:resource+'.list',request_number:telemetry.requests,reason:error.reason||null,
+            retry_after_present:error.retryAfterPresent,backoff_elapsed_ms:0};
+          telemetry.http_429.push(rateEvent);
+        }
         error.endpoint=resource;
         const codes=telemetry.failed_responses[resource]??={};
         const code=failure(error).error_code;
@@ -66,8 +75,10 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
         // Search gets one delayed retry per run. Longer server waits carry over to the next run.
         const wait=Math.max(required,isSearch?10000:1000*2**retry);
         const maxWait=isSearch?15000:3000;
-        if(retry<retries&&wait<=maxWait&&(!record||(next.search_used<80&&telemetry.search_requests<runLimit))){
+        if(retry<retries&&wait<=maxWait&&(!record||(next.search_used<dailySearchLimit&&telemetry.search_requests<runLimit))){
+          const before=clock();
           await pause(wait);
+          if(rateEvent)rateEvent.backoff_elapsed_ms=Math.max(0,clock()-before);
           continue;
         }
         const until=new Date(clock()+Math.max(required,300000)).toISOString();
@@ -122,7 +133,7 @@ function groupCandidates(rows,kind){
 async function collect(channels,{key,previous=[],state={},now=new Date().toISOString(),fetcher=fetch,
   pause=fetcher===fetch?delay:async()=>{},clock=fetcher===fetch?Date.now:()=>Date.parse(now)}={}) {
   const streams=[],checks=[],verified_ids=[],resolutions=[];
-  const telemetry={requests:0,search_requests:0,recovered:0,failed_responses:{},endpoints:{}};
+  const telemetry={requests:0,search_requests:0,recovered:0,failed_responses:{},endpoints:{},http_429:[]};
   const day=quotaDay(now);
   const sameDay=state.day===day;
   const next={...state,day,search_used:sameDay?state.search_used||0:0,rest_used:sameDay?state.rest_used||0:0,
@@ -210,7 +221,7 @@ async function collect(channels,{key,previous=[],state={},now=new Date().toISOSt
     for(const row of priority?[priority,...queue.filter(item=>item!==priority)]:queue){
       if(telemetry.search_requests-start>=limit)break;
       const ticket=row.channel.record_id+':'+kind;
-      if(next.searched.includes(ticket)||next.search_used>=80)continue;
+      if(next.searched.includes(ticket)||next.search_used>=dailySearchLimit)continue;
       try{
         const result=await api('search',{part:'id',channelId:row.id,eventType:kind,type:'video',maxResults:'50'},ticket,start+limit);
         row.discovery[kind]={complete:!!result&&!result.nextPageToken};
@@ -221,7 +232,7 @@ async function collect(channels,{key,previous=[],state={},now=new Date().toISOSt
     await verifyVideos(groupCandidates(eligible,'candidates'),api,details,failed);
   }
 
-  telemetry.daily={pt_day:day,search_requests:next.search_used,other_requests:next.rest_used};
+  telemetry.daily={pt_day:day,search_requests:next.search_used,local_search_limit:dailySearchLimit,other_requests:next.rest_used};
   for(const row of rows){
     const c=row.channel;
     if(!c.youtube_channel_id){

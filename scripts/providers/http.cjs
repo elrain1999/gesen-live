@@ -21,7 +21,9 @@ async function request(url,{headers={},method='GET',body,allow404=false,fetcher=
     const header=response.headers?.get('retry-after');
     const after=header!=null&&/^\d+$/.test(header)?clock()+Number(header)*1000:Date.parse(header);
     const retryAt=Math.max(reset||0,after||0)||undefined;
-    throw new APIError(`API_HTTP_${response.status}`,{status:response.status,reason,retryAt});
+    const error=new APIError(`API_HTTP_${response.status}`,{status:response.status,reason,retryAt});
+    error.retryAfterPresent=header!=null;
+    throw error;
   }
   try{return await response.json();}catch{throw new APIError('API_INVALID_JSON');}
 }

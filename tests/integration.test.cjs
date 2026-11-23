@@ -110,7 +110,7 @@ test('search 429 retries once after a longer delay and leaves recent and known l
    pause:async ms=>{waits.push(ms);time+=ms;}});
  assert.deepEqual(calls,['videos','channels','playlistItems','videos','search','search']);
  assert.deepEqual(waits.filter(ms=>ms>=1000),[10000]);
- assert.deepEqual(first.telemetry.endpoints.search,{requests:2,rate_limits:2,retries:1});
+ assert.deepEqual(first.telemetry.endpoints.search,{requests:2,rate_limits:2,retries:1,succeeded:0,failed:2,retry_succeeded:0});
  assert.deepEqual(first.streams.map(s=>s.id),['known','new']);
  assert.equal(first.checks.find(c=>c.kind==='live').status,'error');
  assert.equal(first.checks.find(c=>c.kind==='live').endpoint,'search');
@@ -120,6 +120,8 @@ test('search 429 retries once after a longer delay and leaves recent and known l
  const second=await Y.collect([yt],{key:'fixture',now,state:first.state,fetcher});
  assert.deepEqual(calls,['videos','playlistItems']);
  assert.equal(second.streams.length,2);
+ assert.equal(second.telemetry.http_429.length,0);
+ assert.equal(second.checks.find(c=>c.kind==='live').status,'deferred');
 });
 
 test('YouTube batches video lookups across channels and preserves ownership filtering',async()=>{
@@ -182,7 +184,7 @@ test('a successful 429 retry clears the warning while retaining the failed respo
  const fetcher=async url=>{
    const resource=new URL(url).pathname.split('/').pop();
    if(resource==='channels')return reply(metadata);
-   if(resource==='search'&&++searchCalls===1)return reply({},429,{'retry-after':'12'});
+   if(resource==='search'&&++searchCalls===1)return reply({error:{message:'secret-value',errors:[{reason:'rateLimitExceeded'}]}},429,{'retry-after':'12'});
    return reply({items:[]});
  };
  const result=await Y.collect([yt],{key:'fixture',now,fetcher,clock:()=>time,
@@ -193,6 +195,9 @@ test('a successful 429 retry clears the warning while retaining the failed respo
  assert.equal(result.telemetry.recovered,1);
  assert.deepEqual(result.telemetry.failed_responses,{search:{API_HTTP_429:1}});
  assert.equal(result.telemetry.requests,5);
+ assert.deepEqual(result.telemetry.http_429,[{method:'search.list',request_number:3,reason:'rateLimitExceeded',retry_after_present:true,backoff_elapsed_ms:12000}]);
+ assert.equal(result.telemetry.endpoints.search.retry_succeeded,1);
+ assert.doesNotMatch(JSON.stringify(result.telemetry),/secret-value|fixture/);
 });
 
 test('live search uses an existing slot to check for a follow-on broadcast',async()=>{
@@ -218,4 +223,41 @@ test('live search uses an existing slot to check for a follow-on broadcast',asyn
  assert.equal(search.length,4);
  assert.equal(result.streams.find(s=>s.id==='new').status,'live');
  assert.equal(result.streams.find(s=>s.id==='ended').status,'archive');
+});
+
+test('scheduled collection and Pages deployment are wired on main',()=>{
+ const workflow=fs.readFileSync('.github/workflows/update.yml','utf8');
+ const cron=[...workflow.matchAll(/^    - cron: '([^']+)'$/gm)].map(match=>match[1]);
+ assert.deepEqual(cron,['7 0-7,15-23 * * *','7,17,27,37,47,57 8-14 * * *']);
+ assert.match(workflow,/^  schedule:\n(?:    #.*\n)*    - cron:/m);
+ assert.match(workflow,/^  collect:\n    runs-on:/m);
+ assert.match(workflow,/^      - run: npm run validate:api\n        env:/m);
+ assert.match(workflow,/^  deploy:\n    needs: collect\n    if: [^\n]*refs\/heads\/main[^\n]*needs.collect.outputs.deployable/m);
+});
+
+test('Actions logs count deferred live channels separately and redact untrusted 429 payloads',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'gesen-log-'));
+ t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const logs=[];
+ for(const method of ['log','error'])t.mock.method(console,method,line=>logs.push(line));
+ const secret='sentinel-private-value';
+ const other={...yt,record_id:'other',youtube_channel_id:'UC'+'b'.repeat(22)};
+ const cached=stream(yt,{id:'cached',fetched_at:now});
+ fs.writeFileSync(path.join(dir,'streams.json'),JSON.stringify({streams:[cached]}));
+ const fetcher=async url=>{
+   const resource=new URL(url).pathname.split('/').pop();
+   if(resource==='videos')return reply({},503);
+   if(resource==='search')return reply({error:{message:secret,errors:[{reason:secret}]}},429,{'retry-after':secret});
+   if(resource==='channels')return reply({items:[yt,other].map(c=>({id:c.youtube_channel_id,contentDetails:{relatedPlaylists:{uploads:c.record_id}}}))});
+   return reply({items:[]});
+ };
+ const snapshot=await main({dataDir:dir,now,env:{YOUTUBE_API_KEY:secret},collectors:{YouTube:{
+   collect:(_,options)=>Y.collect([yt,other],{...options,fetcher})}}});
+ assert.ok(snapshot.streams.some(s=>s.id==='cached'&&s.fetched_at===now));
+ const counts=JSON.parse(logs.find(line=>line.startsWith('YouTube live channel checks: ')).split(': ')[1]);
+ assert.deepEqual(counts,{ok:0,partial:0,deferred:1,error:1});
+ const events=snapshot.telemetry.YouTube.http_429;
+ assert.equal(events.length,2);
+ assert.ok(events.every(e=>e.reason===null&&e.retry_after_present));
+ assert.ok(!logs.join('\n').includes(secret));
 });

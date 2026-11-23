@@ -66,7 +66,8 @@
     const provider = snapshot.providers?.YouTube?.status;
     const generated = Date.parse(snapshot.generated_at);
     const rows=M.streams(snapshot,registered,now).filter(s=>states.has(s.status) && (!games.size || games.has(s.game)));
-    let notice = error;
+    const stalled = snapshot.schema_version && now - generated > 2 * 3600000;
+    let notice = stalled ? '更新が止まっています。現在のライブ配信状況は確認できません。' : error;
     if (!notice) {
       if (!snapshot.schema_version) notice = '配信情報を読み込み中…';
       else if (provider === 'partial') {
@@ -80,7 +81,6 @@
       }
       else if (provider !== 'ok') notice = '配信情報の更新に失敗しました。';
       else if (!Number.isFinite(generated) || generated > now + 300000) notice = '取得日時を確認できません。';
-      else if (now - generated > 2 * 3600000) notice = '配信情報の更新が途絶えています。';
       else if (!rows.length && states.size && snapshot.checks?.some(check=>states.has(check.kind) && check.status!=='ok')) {
         notice = '一部の配信元は確認範囲が限られています。';
       }

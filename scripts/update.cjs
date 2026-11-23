@@ -34,11 +34,14 @@ async function main({dataDir=process.env.RETRO_RING_DATA_DIR||'data',now=new Dat
     result.resolutions.push(...(update.resolutions||[]));result.telemetry[name]=update.telemetry||{};
     if(update.state)state[name]=update.state;
     const checkCounts={};
+    const liveCounts={ok:0,partial:0,deferred:0,error:0};
     for(const check of update.checks){
       checkCounts[check.status]=(checkCounts[check.status]||0)+1;
+      if(check.kind==='live')liveCounts[check.status]=(liveCounts[check.status]||0)+1;
       if(check.error_code)console.error(`${name} ${check.channel_id} ${check.kind}: ${check.status} ${check.endpoint||'collector'} ${check.error_code} (${check.reason||check.category})`);
     }
     console.log(`${name}: ${update.provider.status}; checks=${JSON.stringify(checkCounts)}`);
+    console.log(`${name} live channel checks: ${JSON.stringify(liveCounts)}`);
     console.log(`${name} API telemetry: ${JSON.stringify(result.telemetry[name])}`);
   }
   const previousSuccess=previous.last_success_at||

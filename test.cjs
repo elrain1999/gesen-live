@@ -126,13 +126,21 @@ const {root,production}=require('./tests/helpers.cjs');
       assert.ok(await page.getByText('KOF98 店舗対戦',{exact:true}).isVisible());
       await page.click('#games-toggle');
       const empty={...fixture,streams:[]};
-      const loadSnapshot=async(snapshot,status)=>{
+      const loadSnapshot=async(snapshot,status,count=0)=>{
         responseSnapshot=snapshot;
         await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
         await page.waitForFunction(wanted=>document.getElementById('fetch-status').textContent===wanted,status);
-        assert.equal(await page.locator('.card').count(),0);
+        assert.equal(await page.locator('.card').count(),count);
       };
-      await loadSnapshot({...empty,generated_at:iso(-3600000*3)},'配信情報の更新が途絶えています。');
+      const staleTime=iso(-3*3600000);
+      const stalledNotice='更新が止まっています。現在のライブ配信状況は確認できません。';
+      await loadSnapshot({...fixture,generated_at:staleTime,last_success_at:staleTime,providers:{YouTube:{status:'partial'}},
+        streams:fixture.streams.map(row=>({...row,fetched_at:staleTime}))},stalledNotice,8);
+      assert.equal(await page.locator('#live').count(),0);
+      assert.equal(await page.locator('#upcoming .card').count(),1);
+      assert.equal(await page.locator('#archive .card').count(),7);
+      await loadSnapshot(fixture,'',11);
+      await loadSnapshot({...empty,generated_at:staleTime},stalledNotice);
       assert.match(await page.locator('#results').innerText(),/現在の配信件数は未確認/);
       await loadSnapshot({...empty,providers:{YouTube:{status:'not_configured'}}},'配信情報の更新に失敗しました。');
       assert.match(await page.locator('#updated').innerText(),/最終取得試行/);
