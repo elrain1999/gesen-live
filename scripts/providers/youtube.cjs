@@ -93,8 +93,13 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
 
 function broadcast(video,row,now){
   const details=video.liveStreamingDetails;
-  if(!details||row.id!==video.snippet?.channelId)return null;
-  const status=details.actualEndTime?'archive':details.actualStartTime?'live':details.scheduledStartTime?'upcoming':null;
+  if(!details||row.id!==video.snippet?.channelId||video.status?.privacyStatus==='private')return null;
+  let status;
+  if(details.actualEndTime)status='archive';
+  else if(details.actualStartTime){
+    if(video.snippet.liveBroadcastContent!=='live')return null;
+    status='live';
+  }else if(details.scheduledStartTime)status='upcoming';
   const starts=details.actualStartTime||details.scheduledStartTime;
   if(!status||!Number.isFinite(Date.parse(starts))||typeof video.snippet.title!=='string')return null;
   const raw=details.concurrentViewers;
@@ -108,7 +113,7 @@ function broadcast(video,row,now){
 async function verifyVideos(candidates,api,details,failed){
   for(const batch of batches([...candidates.keys()].filter(id=>!details.has(id)&&!failed.has(id)))){
     let result;
-    try{result=await api('videos',{part:'snippet,liveStreamingDetails',id:batch.join(',')});}
+    try{result=await api('videos',{part:'snippet,liveStreamingDetails,status',id:batch.join(',')});}
     catch(error){
       for(const id of batch){
         failed.add(id);

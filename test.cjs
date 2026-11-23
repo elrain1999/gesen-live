@@ -132,7 +132,7 @@ const {root,production}=require('./tests/helpers.cjs');
         await page.waitForFunction(wanted=>document.getElementById('fetch-status').textContent===wanted,status);
         assert.equal(await page.locator('.card').count(),count);
       };
-      const staleTime=iso(-3*3600000);
+      const staleTime=iso(-67*60000);
       const stalledNotice='更新が止まっています。現在のライブ配信状況は確認できません。';
       await loadSnapshot({...fixture,generated_at:staleTime,last_success_at:staleTime,providers:{YouTube:{status:'partial'}},
         streams:fixture.streams.map(row=>({...row,fetched_at:staleTime}))},stalledNotice,8);

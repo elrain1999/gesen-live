@@ -27,6 +27,30 @@ test('YouTube partial discovery still transitions known live IDs and expires del
  const r=await Y.collect([yt],{key:'x',previous:[old,deleted],now,fetcher});
  const merged=merge([old,deleted],r,[yt],now);assert.equal(merged.length,1);assert.equal(merged[0].status,'archive');
 });
+test('a known live ID is not refreshed from a start time after YouTube stops marking it live',async()=>{
+ const previous=[stream(yt,{id:'ending'}),stream(yt,{id:'ongoing'}),stream(yt,{id:'private'})];
+ const makeVideo=(id,liveBroadcastContent,privacyStatus='public',actualEndTime)=>({
+   id,snippet:{channelId:yt.youtube_channel_id,title:id,liveBroadcastContent},
+   status:{privacyStatus},liveStreamingDetails:{actualStartTime:'2026-11-17T09:00:00Z',actualEndTime}
+ });
+ const state={day:Y.quotaDay(now),search_used:80,uploads:{[yt.youtube_channel_id]:{playlist:'u'}}};
+ const run=async ending=>{
+   const lookups=[];
+   const result=await Y.collect([yt],{key:'fixture',previous,now,state,fetcher:async url=>{
+     const u=new URL(url);
+     lookups.push(u.pathname.split('/').pop());
+     if(!u.pathname.endsWith('/videos'))return reply({items:[]});
+     assert.equal(u.searchParams.get('part'),'snippet,liveStreamingDetails,status');
+     return reply({items:[ending,makeVideo('ongoing','live'),makeVideo('private','live','private')]});
+   }});
+   assert.deepEqual(lookups,['videos','playlistItems']);
+   return merge(previous,result,[yt],now);
+ };
+ const unconfirmed=await run(makeVideo('ending','none'));
+ assert.deepEqual(unconfirmed.map(s=>[s.id,s.status]),[['ongoing','live']]);
+ const confirmed=await run(makeVideo('ending','none','public',now));
+ assert.deepEqual(confirmed.map(s=>[s.id,s.status]),[['ending','archive'],['ongoing','live']]);
+});
 test('YouTube daily search budget is 80, spreads calls over runs, rotates coverage and uses PT reset',async()=>{
  const channels=Array.from({length:50},(_,i)=>({...yt,record_id:'c'+i}));let searchCalls=0;
  const fetcher=async url=>{const route=new URL(url).pathname.split('/').pop();if(route==='search'){searchCalls++;return reply({items:[]});}if(route==='channels')return reply(metadata);return reply({items:[]});};
@@ -88,15 +112,21 @@ test('YouTube non-search budget stops at 8000 per PT day without issuing another
  let calls=0;const r=await Y.collect([yt],{key:'x',now,state:{day:Y.quotaDay(now),search_used:80,rest_used:8000},fetcher:async()=>{calls++;return reply({items:[]});}});
  assert.equal(calls,0);assert.ok(r.checks.every(c=>c.error_code==='API_LOCAL_DAILY_LIMIT'));
 });
-test('live cache expires after two hours even while the page is left open',()=>{
- const M=require('../dist/model.js'),s=stream(yt,{fetched_at:'2026-11-17T07:59:59Z'});
- assert.equal(M.streams({streams:[s]},[yt],Date.parse(now)).length,0);
+test('a stopped snapshot hides unconfirmed live cards after 65 minutes without losing upcoming and archive cards',()=>{
+ const M=require('../dist/model.js');
+ const fetched_at='2026-11-17T08:55:00Z';
+ const live=stream(yt,{fetched_at});
+ const snapshot={streams:[live,
+   stream(yt,{id:'future',status:'upcoming',starts_at:'2026-11-18T00:00:00Z',fetched_at}),
+   stream(yt,{id:'past',status:'archive',fetched_at})]};
+ assert.deepEqual(M.streams(snapshot,[yt],Date.parse(now)-1).map(s=>s.status),['live','upcoming','archive']);
+ assert.deepEqual(M.streams(snapshot,[yt],Date.parse(now)).map(s=>s.status),['upcoming','archive']);
 });
 
 test('search 429 retries once after a longer delay and leaves recent and known live results usable',async()=>{
  const calls=[], waits=[];
  const cached=stream(yt,{id:'known',fetched_at:'2026-11-17T09:00:00Z'});
- const video=(id)=>({id,snippet:{channelId:yt.youtube_channel_id,title:'エヌアイン完全世界'},liveStreamingDetails:{actualStartTime:now}});
+ const video=(id)=>({id,snippet:{channelId:yt.youtube_channel_id,title:'エヌアイン完全世界',liveBroadcastContent:'live'},liveStreamingDetails:{actualStartTime:now}});
  const fetcher=async url=>{
    const u=new URL(url), endpoint=u.pathname.split('/').pop();
    calls.push(endpoint);
@@ -142,7 +172,7 @@ test('YouTube batches video lookups across channels and preserves ownership filt
    if(resource==='search')return reply({items:[]});
    assert.deepEqual(u.searchParams.get('id').split(',').sort(),['a','b','shared']);
    return reply({items:['a','b','shared'].map(id=>({
-     id,snippet:{channelId:id==='b'?other.youtube_channel_id:yt.youtube_channel_id,title:'KOF XI'},
+     id,snippet:{channelId:id==='b'?other.youtube_channel_id:yt.youtube_channel_id,title:'KOF XI',liveBroadcastContent:'live'},
      liveStreamingDetails:{actualStartTime:now},
    }))});
  };
@@ -168,13 +198,37 @@ test('honours Retry-After without long waits and keeps unrelated archive cache',
  assert.deepEqual(merge([cached],r,[yt],now),[cached]);
 });
 
-test('known live cache expires during an outage when no video detail has been confirmed',async()=>{
+test('an outage retains old live data for rechecking while the public view hides it',async()=>{
  const old=stream(yt,{id:'old',fetched_at:'2026-11-17T07:59:59Z'});
  const r=await Y.collect([yt],{key:'fixture',previous:[old],now,fetcher:async()=>reply({error:{errors:[{reason:'dailyLimitExceeded'}]}},403)});
  assert.equal(r.telemetry.requests,1);
  assert.equal(r.verified_ids.length,0);
- assert.equal(merge([old],r,[yt],now).length,0);
+ const merged=merge([old],r,[yt],now);
+ assert.deepEqual(merged,[old]);
+ assert.equal(require('../dist/model.js').streams({streams:merged},[yt],Date.parse(now)).length,0);
  assert.equal(r.checks[0].category,'quota');
+});
+
+test('videos.list cooldown preserves the last observation and recovery archives the same ID',async()=>{
+ const old=stream(yt,{fetched_at:'2026-11-17T08:50:00Z'});
+ const state={day:Y.quotaDay(now),search_used:80,uploads:{[yt.youtube_channel_id]:{playlist:'u'}}};
+ const limited=await Y.collect([yt],{key:'fixture',previous:[old],now,state,fetcher:async url=>
+   new URL(url).pathname.endsWith('/videos')
+     ?reply({error:{errors:[{reason:'rateLimitExceeded'}]}},429,{'retry-after':'600'})
+     :reply({items:[]})});
+ const cached=merge([old],limited,[yt],now);
+ assert.deepEqual(cached,[old]);
+ assert.equal(limited.telemetry.endpoints.videos.requests,1);
+ assert.equal(limited.checks.find(c=>c.kind==='live').category,'rate_limit');
+ const recoveredAt='2026-11-17T10:10:00.000Z';
+ const recovered=await Y.collect([yt],{key:'fixture',previous:cached,now:recoveredAt,state:limited.state,fetcher:async url=>
+   reply({items:new URL(url).pathname.endsWith('/videos')?[{
+     id:old.id,snippet:{channelId:yt.youtube_channel_id,title:old.title,liveBroadcastContent:'none'},
+     liveStreamingDetails:{actualStartTime:old.starts_at,actualEndTime:now}
+   }]:[]})});
+ const rows=merge(cached,recovered,[yt],recoveredAt);
+ assert.deepEqual(rows.map(s=>[s.id,s.status,s.fetched_at]),[[old.id,'archive',recoveredAt]]);
+ assert.equal(recovered.state.cooldowns.videos,undefined);
 });
 
 test('a successful 429 retry clears the warning while retaining the failed response count',async()=>{
@@ -216,7 +270,7 @@ test('live search uses an existing slot to check for a follow-on broadcast',asyn
    }
    const id=request.searchParams.get('id');
    const liveStreamingDetails=id==='ended'?{actualStartTime:'2026-11-17T09:00:00Z',actualEndTime:now}:{actualStartTime:now};
-   return reply({items:[{id,snippet:{channelId:recent.youtube_channel_id,title:'KOF XI'},liveStreamingDetails}]});
+   return reply({items:[{id,snippet:{channelId:recent.youtube_channel_id,title:'KOF XI',liveBroadcastContent:id==='ended'?'none':'live'},liveStreamingDetails}]});
  };
  const result=await Y.collect(channels,{key:'fixture',now,fetcher});
  assert.deepEqual(search[0],[recent.youtube_channel_id,'live']);

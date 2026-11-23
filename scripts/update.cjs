@@ -12,7 +12,7 @@ function merge(previous,result,registered,now){
   // Positive observations survive a failed discovery scan. Verified ID transitions
   // remove old live/upcoming copies even when the new state is an archive.
   const kept=previous.filter(s=>!successful.has(s.channel_id+':'+s.status)&&!verified.has(s.channel_id+':'+s.id)&&!freshIds.has(s.channel_id+':'+s.id));
-  return M.streams({streams:[...fresh,...kept]},registered,Date.parse(now)).map(({game,stale,channel,...s})=>s);
+  return M.streams({streams:[...fresh,...kept]},registered,Date.parse(now),{keepUnconfirmedLive:true}).map(({game,stale,channel,...s})=>s);
 }
 function atomicWrite(filename,value){
   fs.mkdirSync(path.dirname(filename),{recursive:true});const temporary=filename+'.tmp';
@@ -22,7 +22,7 @@ async function main({dataDir=process.env.RETRO_RING_DATA_DIR||'data',now=new Dat
   // Always use the authoritative approved population, even for an isolated probe.
   const registered=M.channels(JSON.parse(fs.readFileSync('data/channels.public.json')));
   let previous={streams:[]};try{previous=JSON.parse(fs.readFileSync(path.join(dataDir,'streams.json')));if(!Array.isArray(previous.streams))throw Error();}catch{console.error('SNAPSHOT_MISSING_OR_INVALID: starting without cache');previous={streams:[]};}
-  previous.streams=M.streams(previous,registered,Date.parse(now)).map(({game,stale,channel,...s})=>s);
+  previous.streams=M.streams(previous,registered,Date.parse(now),{keepUnconfirmedLive:true}).map(({game,stale,channel,...s})=>s);
   let state={};try{const cached=JSON.parse(fs.readFileSync(path.join(dataDir,'fetch-state.json')));if(cached&&typeof cached==='object'&&!Array.isArray(cached))state=cached;}catch{}
   const result={schema_version:1,generated_at:now,streams:[],checks:[],providers:{},resolutions:[],telemetry:{}};
   for(const [name,provider] of Object.entries(collectors)){

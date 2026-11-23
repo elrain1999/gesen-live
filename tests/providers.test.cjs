@@ -18,11 +18,11 @@ test('YouTube handles concurrent streams, upcoming, archive, ordinary upload and
     if(route==='channels')return reply({items:[{id:youtube.youtube_channel_id,contentDetails:{relatedPlaylists:{uploads:'playlist'}}}]});
     if(route==='playlistItems')return reply({items:[{contentDetails:{videoId:'d'}}]});
     if(route==='videos')return reply({items:[
-      ...['a','b'].map(id=>({id,snippet:{channelId:youtube.youtube_channel_id,title:'3rd STRIKE',thumbnails:{}},liveStreamingDetails:{actualStartTime:now}})),
+      ...['a','b'].map(id=>({id,snippet:{channelId:youtube.youtube_channel_id,title:'3rd STRIKE',thumbnails:{},liveBroadcastContent:'live'},liveStreamingDetails:{actualStartTime:now}})),
       {id:'c',snippet:{channelId:youtube.youtube_channel_id,title:'予定'},liveStreamingDetails:{scheduledStartTime:'2026-11-18T00:00:00Z'}},
       {id:'d',snippet:{channelId:youtube.youtube_channel_id,title:'終了'},liveStreamingDetails:{actualStartTime:now,actualEndTime:now}},
       {id:'regular',snippet:{channelId:youtube.youtube_channel_id,title:'通常動画'}},
-      {id:'foreign',snippet:{channelId:'different',title:'別'},liveStreamingDetails:{actualStartTime:now}}
+      {id:'foreign',snippet:{channelId:'different',title:'別',liveBroadcastContent:'live'},liveStreamingDetails:{actualStartTime:now}}
     ]});throw Error('unknown endpoint');
   };
   const result=await Y.collect([youtube],{key:'test-secret',now,fetcher});
@@ -78,7 +78,7 @@ test('viewer count from existing video details; upload playlist cache survives r
     if(resource==='channels')return reply({items:[{id:youtube.youtube_channel_id,contentDetails:{relatedPlaylists:{uploads:'upload-list'}}}]});
     if(resource==='playlistItems')return reply({items:ids.map(videoId=>({contentDetails:{videoId}}))});
     if(resource==='search')return reply({items:[]});
-    return reply({items:ids.map((id,i)=>({id,snippet:{channelId:youtube.youtube_channel_id,title:'北斗の拳'},liveStreamingDetails:{actualStartTime:now,concurrentViewers:['25','0',undefined,'invalid'][i]}}))});
+    return reply({items:ids.map((id,i)=>({id,snippet:{channelId:youtube.youtube_channel_id,title:'北斗の拳',liveBroadcastContent:'live'},liveStreamingDetails:{actualStartTime:now,concurrentViewers:['25','0',undefined,'invalid'][i]}}))});
   };
   const first=await Y.collect([youtube],{key:'fixture',now,fetcher});
   assert.deepEqual(first.streams.map(s=>s.concurrent_viewers),[25,0,null,null]);
