@@ -2,6 +2,7 @@ const {setTimeout:delay}=require('node:timers/promises');
 const {request,failure,APIError}=require('./http.cjs');
 
 const dailySearchLimit=80;
+const pendingEndMaxAge=2*3600000;
 const kinds=['live','upcoming','archive'];
 const quotaDay=now=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(now));
 const handle=value=>String(value||'').normalize('NFC').toLowerCase();
@@ -91,9 +92,11 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
   };
 }
 
+const visibleOwner=(video,row)=>video?.snippet?.channelId===row.id&&video.status?.privacyStatus!=='private';
+
 function broadcast(video,row,now){
   const details=video.liveStreamingDetails;
-  if(!details||row.id!==video.snippet?.channelId||video.status?.privacyStatus==='private')return null;
+  if(!details||!visibleOwner(video,row))return null;
   let status;
   if(details.actualEndTime)status='archive';
   else if(details.actualStartTime){
@@ -146,6 +149,9 @@ async function collect(channels,{key,previous=[],state={},now=new Date().toISOSt
     uploads:{...state.uploads},cooldowns:{...state.cooldowns},last_success:{...state.last_success}};
   if(!key)return {streams,checks:channels.flatMap(c=>kinds.map(kind=>({channel_id:c.record_id,kind,status:'not_configured',category:'auth',checked_at:now}))),verified_ids,resolutions,telemetry,state:next,provider:{status:'not_configured',message:'APIキー未設定のため配信情報は未取得'}};
   const api=collectorAPI({key,next,telemetry,fetcher,pause,clock});
+  const pendingEnd=state.pending_end||{};
+  const nowMs=Date.parse(now);
+  next.pending_end={};
   const offset=sameDay?state.cursor||0:((state.cursor||0)+(state.day?40:0))%Math.max(1,channels.length);
   next.cursor=offset;
   const rows=[...channels.slice(offset),...channels.slice(0,offset)].map(channel=>{
@@ -153,7 +159,8 @@ async function collect(channels,{key,previous=[],state={},now=new Date().toISOSt
     const id=channel.youtube_channel_id||(cached?.handle===channel.youtube_handle&&
       Date.parse(now)-Date.parse(cached.verified_at)<30*86400000&&channelId(cached.id)?cached.id:null);
     const recent=previous.filter(s=>s.channel_id===channel.record_id&&s.status!=='archive').map(s=>s.id);
-    const known=new Set([...recent,...(next.known[channel.record_id]||[])]);
+    const cachedKnown=(next.known[channel.record_id]||[]).filter(id=>!pendingEnd[id]||nowMs-Date.parse(pendingEnd[id])<pendingEndMaxAge);
+    const known=new Set([...recent,...cachedKnown]);
     return {channel,id,known,candidates:new Set(known),discovery:{}};
   });
   const details=new Map();
@@ -249,10 +256,23 @@ async function collect(channels,{key,previous=[],state={},now=new Date().toISOSt
     const observed={live:0,upcoming:0,archive:0};
     for(const id of row.candidates){
       if(!row.id)break;
-      if(!details.has(id)){retained.push(id);continue;}
+      if(!details.has(id)){
+        retained.push(id);
+        if(row.known.has(id)&&pendingEnd[id])next.pending_end[id]=pendingEnd[id];
+        continue;
+      }
       verified_ids.push({channel_id:c.record_id,id});
-      const stream=broadcast(details.get(id)||{},row,now);
-      if(!stream)continue;
+      const video=details.get(id);
+      const stream=broadcast(video||{},row,now);
+      if(!stream){
+        const details=video?.liveStreamingDetails;
+        // Keep a known ID in the existing batches while YouTube fills in the end time.
+        if(row.known.has(id)&&visibleOwner(video,row)&&Number.isFinite(Date.parse(details?.actualStartTime))&&!details.actualEndTime){
+          retained.push(id);
+          next.pending_end[id]=pendingEnd[id]||now;
+        }
+        continue;
+      }
       streams.push(stream);observed[stream.status]++;
       if(stream.status!=='archive')retained.push(id);
     }

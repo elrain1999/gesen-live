@@ -34,22 +34,29 @@ test('a known live ID is not refreshed from a start time after YouTube stops mar
    status:{privacyStatus},liveStreamingDetails:{actualStartTime:'2026-11-17T09:00:00Z',actualEndTime}
  });
  const state={day:Y.quotaDay(now),search_used:80,uploads:{[yt.youtube_channel_id]:{playlist:'u'}}};
- const run=async ending=>{
+ const run=async (ending,previous,state,checkedAt)=>{
    const lookups=[];
-   const result=await Y.collect([yt],{key:'fixture',previous,now,state,fetcher:async url=>{
+   const result=await Y.collect([yt],{key:'fixture',previous,now:checkedAt,state,fetcher:async url=>{
      const u=new URL(url);
      lookups.push(u.pathname.split('/').pop());
      if(!u.pathname.endsWith('/videos'))return reply({items:[]});
      assert.equal(u.searchParams.get('part'),'snippet,liveStreamingDetails,status');
-     return reply({items:[ending,makeVideo('ongoing','live'),makeVideo('private','live','private')]});
+     const ids=u.searchParams.get('id').split(',');
+     return reply({items:[ending,makeVideo('ongoing','live'),makeVideo('private','live','private')].filter(v=>ids.includes(v.id))});
    }});
    assert.deepEqual(lookups,['videos','playlistItems']);
-   return merge(previous,result,[yt],now);
+   return {state:result.state,rows:merge(previous,result,[yt],checkedAt)};
  };
- const unconfirmed=await run(makeVideo('ending','none'));
- assert.deepEqual(unconfirmed.map(s=>[s.id,s.status]),[['ongoing','live']]);
- const confirmed=await run(makeVideo('ending','none','public',now));
- assert.deepEqual(confirmed.map(s=>[s.id,s.status]),[['ending','archive'],['ongoing','live']]);
+ const pending=makeVideo('ending','none');
+ const first=await run(pending,previous,state,now);
+ assert.deepEqual(first.rows.map(s=>[s.id,s.status]),[['ongoing','live']]);
+ const second=await run(pending,first.rows,first.state,'2026-11-17T10:10:00.000Z');
+ assert.deepEqual(second.rows.map(s=>[s.id,s.status]),[['ongoing','live']]);
+ const ended=makeVideo('ending','none','public',now);
+ const confirmed=await run(ended,second.rows,second.state,'2026-11-17T10:20:00.000Z');
+ assert.deepEqual(confirmed.rows.map(s=>[s.id,s.status]).sort(),[['ending','archive'],['ongoing','live']]);
+ const expired=await run(ended,second.rows,second.state,'2026-11-17T12:00:00.000Z');
+ assert.deepEqual(expired.rows.map(s=>[s.id,s.status]),[['ongoing','live']]);
 });
 test('YouTube daily search budget is 80, spreads calls over runs, rotates coverage and uses PT reset',async()=>{
  const channels=Array.from({length:50},(_,i)=>({...yt,record_id:'c'+i}));let searchCalls=0;
