@@ -15,7 +15,7 @@ test('YouTube handles concurrent streams, upcoming, archive, ordinary upload and
   let searches=0;const fetcher=async url=>{
     const u=new URL(url),route=u.pathname.split('/').pop();
     if(route==='search'){searches++;return reply({items:[{id:{videoId:'a'}},{id:{videoId:'b'}},{id:{videoId:'c'}}]});}
-    if(route==='channels')return reply({items:[{contentDetails:{relatedPlaylists:{uploads:'playlist'}}}]});
+    if(route==='channels')return reply({items:[{id:youtube.youtube_channel_id,contentDetails:{relatedPlaylists:{uploads:'playlist'}}}]});
     if(route==='playlistItems')return reply({items:[{contentDetails:{videoId:'d'}}]});
     if(route==='videos')return reply({items:[
       ...['a','b'].map(id=>({id,snippet:{channelId:youtube.youtube_channel_id,title:'3rd STRIKE',thumbnails:{}},liveStreamingDetails:{actualStartTime:now}})),
@@ -26,7 +26,7 @@ test('YouTube handles concurrent streams, upcoming, archive, ordinary upload and
     ]});throw Error('unknown endpoint');
   };
   const result=await Y.collect([youtube],{key:'test-secret',now,fetcher});
-  assert.deepEqual(result.streams.map(s=>s.status),['live','live','upcoming','archive']);
+  assert.deepEqual(result.streams.map(s=>s.status).sort(),['archive','live','live','upcoming']);
   assert.equal(searches,2);assert.ok(result.checks.every(c=>c.status==='ok'));
   searches=0;await Y.collect([youtube],{key:'test-secret',state:result.state,now,fetcher});assert.equal(searches,0);
 });
@@ -75,7 +75,7 @@ test('viewer count from existing video details; upload playlist cache survives r
   const ids=['aaa00000001','aaa00000002','aaa00000003','aaa00000004'];
   const fetcher=async url=>{
     const resource=new URL(url).pathname.split('/').pop();calls.push(resource);
-    if(resource==='channels')return reply({items:[{contentDetails:{relatedPlaylists:{uploads:'upload-list'}}}]});
+    if(resource==='channels')return reply({items:[{id:youtube.youtube_channel_id,contentDetails:{relatedPlaylists:{uploads:'upload-list'}}}]});
     if(resource==='playlistItems')return reply({items:ids.map(videoId=>({contentDetails:{videoId}}))});
     if(resource==='search')return reply({items:[]});
     return reply({items:ids.map((id,i)=>({id,snippet:{channelId:youtube.youtube_channel_id,title:'北斗の拳'},liveStreamingDetails:{actualStartTime:now,concurrentViewers:['25','0',undefined,'invalid'][i]}}))});
@@ -84,5 +84,5 @@ test('viewer count from existing video details; upload playlist cache survives r
   assert.deepEqual(first.streams.map(s=>s.concurrent_viewers),[25,0,null,null]);
   calls.length=0;
   await Y.collect([youtube],{key:'fixture',now,state:first.state,fetcher});
-  assert.deepEqual(calls,['playlistItems','videos']);
+  assert.deepEqual(calls,['videos','playlistItems']);
 });

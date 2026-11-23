@@ -9,7 +9,7 @@ function report(snapshot,registered){
       const check=snapshot.checks.find(x=>x.channel_id===c.record_id&&x.kind===kind)||{status:'not_checked'};
       const count=snapshot.streams.filter(x=>x.channel_id===c.record_id&&x.status===kind&&x.fetched_at===snapshot.generated_at).length;
       const outcome=check.status==='not_configured'?'auth_not_configured':check.status==='unresolved_id'?'channel_id_unresolved':check.status==='channel_unavailable'?'channel_unavailable':check.category==='auth'?'authentication_error':['quota','rate_limit'].includes(check.category)?'api_limit':check.status==='error'?'request_failed':['ok','partial','not_available'].includes(check.status)?count?'api_success_with_broadcast':'api_success_no_broadcast_in_scanned_window':'not_checked';
-      return {kind,outcome,count,coverage:check.coverage||'bounded_scan',...(check.error_code?{error_code:check.error_code}:{}),...(check.category?{category:check.category}:{})};
+      return {kind,outcome,count,status:check.status,coverage:check.coverage||'bounded_scan',...(check.error_code?{error_code:check.error_code}:{}),...(check.category?{category:check.category}:{}),...(check.endpoint?{endpoint:check.endpoint}:{})};
     });
     return {record_id:c.record_id,platform:c.platform,display_name:c.display_name,identifier:c.platform==='Twitch'?'login_confirmed':c.youtube_channel_id?'fixed_id_from_phase4':resolution?.status==='verified'?'fixed_id_verified_by_api':'fixed_id_unresolved',results};
   });

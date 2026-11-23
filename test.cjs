@@ -122,6 +122,7 @@ const {root,production}=require('./tests/helpers.cjs');
         await page.click('[data-game=""]');
       }
       assert.equal(await page.locator('.card').count(),11);
+      assert.ok(await page.getByText('KOF98 店舗対戦',{exact:true}).isVisible());
       await page.click('#games-toggle');
       const empty={...fixture,streams:[]};
       const loadSnapshot=async(snapshot,status)=>{
@@ -136,6 +137,12 @@ const {root,production}=require('./tests/helpers.cjs');
       assert.match(await page.locator('#updated').innerText(),/最終取得試行/);
       await loadSnapshot({...empty,checks:[{kind:'live',status:'partial'}]},'一部の配信元は確認範囲が限られています。');
       assert.match(await page.locator('#results').innerText(),/現在の配信件数は未確認/);
+      await loadSnapshot({...empty,providers:{YouTube:{status:'partial'}},last_success_at:iso(-1000),
+        checks:[{channel_id:active[0].record_id,kind:'live',status:'ok'},
+          {channel_id:active[1].record_id,kind:'live',status:'partial'},
+          {channel_id:active[2].record_id,kind:'live',status:'error'}]},
+        '一部またはすべての配信情報を取得できていません。 ライブ確認 1／3件完了、1件は一部確認、1件は取得失敗・未確認。');
+      assert.match(await page.locator('#updated').innerText(),/最終取得成功/);
       await loadSnapshot(empty,'');
       assert.match(await page.locator('#results').innerText(),/条件に該当する配信情報がありません/);
       assert.deepEqual(errors,[]);

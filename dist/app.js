@@ -77,9 +77,18 @@
         notice = '一部の配信元は確認範囲が限られています。';
       }
     }
+    const liveChecks=(snapshot.checks||[]).filter(check=>check.kind==='live'&&check.channel_id);
+    if(states.has('live')&&liveChecks.length){
+      const incomplete=liveChecks.filter(check=>check.status==='partial').length;
+      const complete=liveChecks.filter(check=>check.status==='ok').length;
+      const failed=liveChecks.length-complete-incomplete;
+      if(incomplete||failed)notice+=(notice?' ':'')+'ライブ確認 '+complete+'／'+liveChecks.length+'件完了、'+incomplete+
+        '件は一部確認、'+failed+'件は取得失敗・未確認。';
+    }
     byId('fetch-status').textContent = notice;
     byId('updated').textContent = (snapshotPreview?'固定プレビュー · ':'')+
-      (provider === 'ok' ? '最終更新 ' : '最終取得試行 ')+formatTime(snapshot.generated_at)+'（日本時間）';
+      (provider === 'ok' ? '最終更新 ' : '最終取得試行 ')+formatTime(snapshot.generated_at)+'（日本時間）'+
+      (provider!=='ok'&&snapshot.last_success_at?' · 最終取得成功 '+formatTime(snapshot.last_success_at):'');
     const sort=byId('sort').value;
     const html=Object.entries(labels).filter(([state])=>states.has(state)).map(([state,label])=>{
       const items=rows.filter(row=>row.status===state).sort((a,b)=>{

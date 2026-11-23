@@ -5,12 +5,13 @@ const {failure}=require('./providers/http.cjs');
 // Twitch is frozen: do not import, authenticate, collect, or probe its adapter.
 const providers={YouTube:require('./providers/youtube.cjs')};
 function merge(previous,result,registered,now){
-  const successful=new Set(result.checks.filter(c=>['ok','not_available','channel_unavailable'].includes(c.status)).map(c=>c.channel_id+':'+c.kind));
+  const successful=new Set(result.checks.filter(c=>['ok','not_available','channel_unavailable'].includes(c.status)&&c.coverage!=='recent_uploads').map(c=>c.channel_id+':'+c.kind));
   const verified=new Set((result.verified_ids||[]).map(s=>s.channel_id+':'+s.id));
   const fresh=result.streams||[];
+  const freshIds=new Set(fresh.map(s=>s.channel_id+':'+s.id));
   // Positive observations survive a failed discovery scan. Verified ID transitions
   // remove old live/upcoming copies even when the new state is an archive.
-  const kept=previous.filter(s=>!successful.has(s.channel_id+':'+s.status)&&!verified.has(s.channel_id+':'+s.id)&&!fresh.some(n=>n.channel_id===s.channel_id&&n.id===s.id));
+  const kept=previous.filter(s=>!successful.has(s.channel_id+':'+s.status)&&!verified.has(s.channel_id+':'+s.id)&&!freshIds.has(s.channel_id+':'+s.id));
   return M.streams({streams:[...fresh,...kept]},registered,Date.parse(now)).map(({game,stale,channel,...s})=>s);
 }
 function atomicWrite(filename,value){
@@ -35,6 +36,9 @@ async function main({dataDir=process.env.RETRO_RING_DATA_DIR||'data',now=new Dat
     console.log(`${name}: ${update.provider.status}; checks=${update.checks.length}; errors=${update.checks.filter(c=>c.status==='error').length}`);
     for(const check of update.checks.filter(c=>c.error_code))console.error(`${name} ${check.channel_id} ${check.kind}: ${check.error_code} (${check.category})`);
   }
+  const previousSuccess=previous.last_success_at||
+    (previous.streams.some(s=>s.fetched_at===previous.generated_at)?previous.generated_at:null);
+  result.last_success_at=result.checks.some(c=>c.status==='ok'||(c.observed||0)>0)?now:previousSuccess;
   result.providers.Twitch={status:'frozen',message:'Twitchは開発・取得・表示を凍結中です'};
   // Each file is replaced atomically; never overwrite a good snapshot with a partial write.
   atomicWrite(path.join(dataDir,'fetch-state.json'),state);
