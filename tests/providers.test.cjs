@@ -35,7 +35,7 @@ test('YouTube unresolved IDs are not guessed and failures remain errors',async()
   const skipped=await Y.collect([unresolved],{key:'x',now,fetcher:()=>{throw Error('called');}});
   assert.ok(skipped.checks.every(c=>c.status==='unresolved_id'));
   const result=await Y.collect([youtube],{key:'x',now,fetcher:async()=>reply({},403)});
-  assert.ok(result.checks.every(c=>c.status==='error'));assert.equal(result.provider.status,'partial');
+  assert.ok(result.checks.every(c=>c.status==='error'));assert.equal(result.provider.status,'error');
 });
 test('Twitch auth, live/VOD dedup, canceled/vacation schedule, 404 and partial failure',{skip:'Twitch全面凍結：既存テストを保存し実行しない'},async()=>{
   let scheduleStatus=200, videosStatus=200;

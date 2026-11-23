@@ -112,6 +112,7 @@ test('search 429 retries at most twice with backoff and leaves recent and known 
  assert.deepEqual(first.streams.map(s=>s.id),['known','new']);
  assert.equal(first.checks.find(c=>c.kind==='live').endpoint,'search');
  assert.equal(first.checks.find(c=>c.kind==='archive').status,'ok');
+ assert.equal(first.checks.find(c=>c.kind==='upcoming').status,'deferred');
  calls.length=0;
  const second=await Y.collect([yt],{key:'fixture',now,state:first.state,fetcher});
  assert.deepEqual(calls,['videos','playlistItems']);
@@ -169,4 +170,45 @@ test('known live cache expires during an outage when no video detail has been co
  assert.equal(r.verified_ids.length,0);
  assert.equal(merge([old],r,[yt],now).length,0);
  assert.equal(r.checks[0].category,'quota');
+});
+
+test('a successful 429 retry clears the warning while retaining the failed response count',async()=>{
+ let searchCalls=0;
+ const fetcher=async url=>{
+   const resource=new URL(url).pathname.split('/').pop();
+   if(resource==='channels')return reply(metadata);
+   if(resource==='search'&&++searchCalls===1)return reply({},429);
+   return reply({items:[]});
+ };
+ const result=await Y.collect([yt],{key:'fixture',now,fetcher});
+ assert.equal(result.provider.status,'ok');
+ assert.ok(result.checks.every(c=>c.status==='ok'));
+ assert.equal(result.telemetry.recovered,1);
+ assert.deepEqual(result.telemetry.failed_responses,{search:{API_HTTP_429:1}});
+ assert.equal(result.telemetry.requests,5);
+});
+
+test('live search uses an existing slot to check for a follow-on broadcast',async()=>{
+ const recent={...yt,record_id:'recent',youtube_channel_id:'UC'+'z'.repeat(22)};
+ const channels=[yt,recent];
+ const search=[];
+ const fetcher=async url=>{
+   const request=new URL(url);
+   const resource=request.pathname.split('/').pop();
+   if(resource==='channels')return reply({items:channels.map(c=>({id:c.youtube_channel_id,contentDetails:{relatedPlaylists:{uploads:c.record_id}}}))});
+   if(resource==='playlistItems')return reply({items:request.searchParams.get('playlistId')==='recent'?[{contentDetails:{videoId:'ended'}}]:[]});
+   if(resource==='search'){
+     const id=request.searchParams.get('channelId'),kind=request.searchParams.get('eventType');
+     search.push([id,kind]);
+     return reply({items:id===recent.youtube_channel_id&&kind==='live'?[{id:{videoId:'new'}}]:[]});
+   }
+   const id=request.searchParams.get('id');
+   const liveStreamingDetails=id==='ended'?{actualStartTime:'2026-11-17T09:00:00Z',actualEndTime:now}:{actualStartTime:now};
+   return reply({items:[{id,snippet:{channelId:recent.youtube_channel_id,title:'KOF XI'},liveStreamingDetails}]});
+ };
+ const result=await Y.collect(channels,{key:'fixture',now,fetcher});
+ assert.deepEqual(search[0],[recent.youtube_channel_id,'live']);
+ assert.equal(search.length,4);
+ assert.equal(result.streams.find(s=>s.id==='new').status,'live');
+ assert.equal(result.streams.find(s=>s.id==='ended').status,'archive');
 });

@@ -33,12 +33,17 @@ async function main({dataDir=process.env.RETRO_RING_DATA_DIR||'data',now=new Dat
     result.streams.push(...merge(previous.streams,update,channels,now));result.checks.push(...update.checks);result.providers[name]=update.provider;
     result.resolutions.push(...(update.resolutions||[]));result.telemetry[name]=update.telemetry||{};
     if(update.state)state[name]=update.state;
-    console.log(`${name}: ${update.provider.status}; checks=${update.checks.length}; errors=${update.checks.filter(c=>c.status==='error').length}`);
-    for(const check of update.checks.filter(c=>c.error_code))console.error(`${name} ${check.channel_id} ${check.kind}: ${check.error_code} (${check.category})`);
+    const checkCounts={};
+    for(const check of update.checks){
+      checkCounts[check.status]=(checkCounts[check.status]||0)+1;
+      if(check.error_code)console.error(`${name} ${check.channel_id} ${check.kind}: ${check.status} ${check.endpoint||'collector'} ${check.error_code} (${check.reason||check.category})`);
+    }
+    console.log(`${name}: ${update.provider.status}; checks=${JSON.stringify(checkCounts)}`);
+    console.log(`${name} API telemetry: ${JSON.stringify(result.telemetry[name])}`);
   }
   const previousSuccess=previous.last_success_at||
     (previous.streams.some(s=>s.fetched_at===previous.generated_at)?previous.generated_at:null);
-  result.last_success_at=result.checks.some(c=>c.status==='ok'||(c.observed||0)>0)?now:previousSuccess;
+  result.last_success_at=result.checks.some(c=>['ok','partial'].includes(c.status)||(c.observed||0)>0)?now:previousSuccess;
   result.providers.Twitch={status:'frozen',message:'Twitchは開発・取得・表示を凍結中です'};
   // Each file is replaced atomically; never overwrite a good snapshot with a partial write.
   atomicWrite(path.join(dataDir,'fetch-state.json'),state);

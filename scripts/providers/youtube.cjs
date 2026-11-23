@@ -10,20 +10,21 @@ const batches=(ids)=>Array.from({length:Math.ceil(ids.length/50)},(_,i)=>ids.sli
 function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
   const blocked=new Map();
   const retried=new Set();
+  const deferred=error=>Object.assign(new APIError(error.message),error,{deferred:true});
   let fatal;
   return async function api(resource,params,record,runLimit=Infinity) {
     const stats=telemetry.endpoints[resource]??={requests:0,rate_limits:0,retries:0};
     const defer=Date.parse(next.cooldowns[resource]?.until);
-    if(fatal)throw fatal;
-    if(blocked.has(resource))throw blocked.get(resource);
+    if(fatal)throw deferred(fatal);
+    if(blocked.has(resource))throw deferred(blocked.get(resource));
     if(resource==='search'&&next.search_quota_day===next.day){
-      const error=new APIError('API_YOUTUBE_SEARCH_QUOTA',{reason:'quotaExceeded'});error.endpoint=resource;throw error;
+      const error=new APIError('API_YOUTUBE_SEARCH_QUOTA',{reason:'quotaExceeded'});error.endpoint=resource;throw deferred(error);
     }
     if(defer>clock()){
       const stored=next.cooldowns[resource];
       const error=new APIError(stored.error_code,{status:stored.status,reason:stored.reason,retryAt:defer});
       error.category=stored.category;error.endpoint=resource;
-      throw error;
+      throw deferred(error);
     }
     if(record&&(next.search_used>=80||telemetry.search_requests>=runLimit))return null;
     const retries=retried.has(resource)?0:2;
@@ -34,7 +35,7 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
       }else{
         if(next.rest_used>=8000){
           const error=new APIError('API_LOCAL_DAILY_LIMIT');
-          error.category='quota';fatal=error;throw error;
+          error.category='quota';error.endpoint=resource;fatal=error;throw deferred(error);
         }
         next.rest_used++;
       }
@@ -45,10 +46,14 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
         const data=await request('https://www.googleapis.com/youtube/v3/'+resource+'?'+new URLSearchParams({...params,key}),{fetcher,telemetry,clock});
         if(!Array.isArray(data?.items))throw new APIError('API_INVALID_SHAPE');
         if(record)next.searched.push(record);
+        if(retry)telemetry.recovered++;
         delete next.cooldowns[resource];
         return data;
       }catch(error){
         error.endpoint=resource;
+        const codes=telemetry.failed_responses[resource]??={};
+        const code=failure(error).error_code;
+        codes[code]=(codes[code]||0)+1;
         if(error.category==='auth'||(error.category==='quota'&&resource!=='search'))fatal=error;
         if(resource==='search'&&error.category==='quota'){blocked.set(resource,error);next.search_quota_day=next.day;}
         if(error.category!=='rate_limit')throw error;
@@ -111,7 +116,7 @@ function groupCandidates(rows,kind){
 async function collect(channels,{key,previous=[],state={},now=new Date().toISOString(),fetcher=fetch,
   pause=fetcher===fetch?delay:async()=>{},clock=fetcher===fetch?Date.now:()=>Date.parse(now)}={}) {
   const streams=[],checks=[],verified_ids=[],resolutions=[];
-  const telemetry={requests:0,search_requests:0,endpoints:{}};
+  const telemetry={requests:0,search_requests:0,recovered:0,failed_responses:{},endpoints:{}};
   const day=quotaDay(now);
   const sameDay=state.day===day;
   const next={...state,day,search_used:sameDay?state.search_used||0:0,rest_used:sameDay?state.rest_used||0:0,
@@ -172,27 +177,45 @@ async function collect(channels,{key,previous=[],state={},now=new Date().toISOSt
   }
   await verifyVideos(groupCandidates(eligible,'candidates'),api,details,failed);
 
+  // Give one existing live-search slot to a likely follow-on broadcast.
+  // A recently ended stream is a discovery hint, never evidence of a live stream.
+  const recentEnd=row=>{
+    let latest=0;
+    for(const id of row.candidates){
+      const video=broadcast(details.get(id)||{},row,now);
+      if(video?.status==='live')return 0;
+      if(video?.status==='archive')latest=Math.max(latest,Date.parse(video.ends_at)||0);
+    }
+    return latest>=Date.parse(now)-6*3600000?latest:0;
+  };
+
   // A dedicated live scan takes precedence over every upcoming search.
   for(const [kind,limit] of [['live',6],['upcoming',2]]){
     const start=telemetry.search_requests;
     const index=eligible.findIndex(r=>r.channel.record_id===next.search_cursor[kind]);
     const rotation=index<0?0:index+1;
     const queue=[...eligible.slice(rotation),...eligible.slice(0,rotation)];
-    for(const row of queue){
+    let priority;
+    if(kind==='live'){
+      const ranked=queue.filter(row=>!next.searched.includes(row.channel.record_id+':live'))
+        .map(row=>({row,end:recentEnd(row)})).filter(item=>item.end).sort((a,b)=>b.end-a.end);
+      priority=ranked[0]?.row;
+    }
+    for(const row of priority?[priority,...queue.filter(item=>item!==priority)]:queue){
       if(telemetry.search_requests-start>=limit)break;
       const ticket=row.channel.record_id+':'+kind;
       if(next.searched.includes(ticket)||next.search_used>=80)continue;
-      const before=telemetry.search_requests;
       try{
         const result=await api('search',{part:'id',channelId:row.id,eventType:kind,type:'video',maxResults:'50'},ticket,start+limit);
         row.discovery[kind]={complete:!!result&&!result.nextPageToken};
+        if(result&&row!==priority)next.search_cursor[kind]=row.channel.record_id;
         for(const item of result?.items||[])if(item.id?.videoId)row.candidates.add(item.id.videoId);
       }catch(error){row.discovery[kind]={error};}
-      if(telemetry.search_requests>before)next.search_cursor[kind]=row.channel.record_id;
     }
     await verifyVideos(groupCandidates(eligible,'candidates'),api,details,failed);
   }
 
+  telemetry.daily={pt_day:day,search_requests:next.search_used,other_requests:next.rest_used};
   for(const row of rows){
     const c=row.channel;
     if(!c.youtube_channel_id){
@@ -215,7 +238,7 @@ async function collect(channels,{key,previous=[],state={},now=new Date().toISOSt
     for(const kind of kinds){
       const err=row.identityError||row.detailsError||row.uploadsError||row.discovery[kind]?.error;
       const complete=!!row.id&&!err&&(kind==='archive'||row.discovery[kind]?.complete);
-      const status=!row.id?'unresolved_id':err?'error':complete?'ok':'partial';
+      const status=!row.id?'unresolved_id':err?(err.deferred?'deferred':'error'):complete?'ok':'partial';
       const ticket=c.record_id+':'+kind;
       if(complete)next.last_success[ticket]=now;
       checks.push({channel_id:c.record_id,kind,status,checked_at:now,
@@ -225,8 +248,10 @@ async function collect(channels,{key,previous=[],state={},now=new Date().toISOSt
         coverage:kind==='archive'?'recent_uploads':complete?'bounded_scan':'known_and_recent',observed:observed[kind]});
     }
   }
-  const errors=checks.some(c=>['error','unresolved_id'].includes(c.status));
-  return {streams,checks,verified_ids,resolutions,telemetry,state:next,provider:{status:errors?'partial':'ok',
-    message:errors?'公式APIの一部が未取得です。チャンネル別の取得結果を確認できます。':'公式API取得（直近の投稿と既知の配信を確認。新規検索はライブ優先、PT日あたり最大80回）'}};
+  const failedCheck=check=>!['ok','partial'].includes(check.status);
+  const errors=checks.some(failedCheck);
+  const anyCoverage=streams.length>0||checks.some(check=>!failedCheck(check));
+  const status=errors?(anyCoverage?'partial':'error'):'ok';
+  return {streams,checks,verified_ids,resolutions,telemetry,state:next,provider:{status}};
 }
 module.exports={collect,quotaDay};

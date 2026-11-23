@@ -59,7 +59,7 @@ jobs:
           const snapshot = require('./data/streams.json');
           const hasRecords = visible_now.total > 0;
           const status = snapshot.providers.YouTube.status;
-          const deployable = status === 'ok' || (status === 'partial' && (hasRecords || snapshot.last_success_at));
+          const deployable = status === 'ok' || (['partial', 'error'].includes(status) && (hasRecords || snapshot.last_success_at));
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `has_records=${hasRecords}\ndeployable=${Boolean(deployable)}\n`);
           console.log(`YouTube status: ${status}; displayable records: ${visible_now.total}`);
           NODE

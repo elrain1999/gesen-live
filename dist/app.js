@@ -69,21 +69,13 @@
     let notice = error;
     if (!notice) {
       if (!snapshot.schema_version) notice = '配信情報を読み込み中…';
-      else if (provider === 'not_configured') notice = 'YouTube APIキーが未設定のため、配信情報は未取得です。';
-      else if (provider !== 'ok') notice = '一部またはすべての配信情報を取得できていません。';
+      else if (provider === 'partial') notice = '一部の配信情報を確認できませんでした。';
+      else if (provider !== 'ok') notice = '配信情報の更新に失敗しました。';
       else if (!Number.isFinite(generated) || generated > now + 300000) notice = '取得日時を確認できません。';
       else if (now - generated > 2 * 3600000) notice = '配信情報の更新が途絶えています。';
       else if (!rows.length && states.size && snapshot.checks?.some(check=>states.has(check.kind) && check.status!=='ok')) {
         notice = '一部の配信元は確認範囲が限られています。';
       }
-    }
-    const liveChecks=(snapshot.checks||[]).filter(check=>check.kind==='live'&&check.channel_id);
-    if(states.has('live')&&liveChecks.length){
-      const incomplete=liveChecks.filter(check=>check.status==='partial').length;
-      const complete=liveChecks.filter(check=>check.status==='ok').length;
-      const failed=liveChecks.length-complete-incomplete;
-      if(incomplete||failed)notice+=(notice?' ':'')+'ライブ確認 '+complete+'／'+liveChecks.length+'件完了、'+incomplete+
-        '件は一部確認、'+failed+'件は取得失敗・未確認。';
     }
     byId('fetch-status').textContent = notice;
     byId('updated').textContent = (snapshotPreview?'固定プレビュー · ':'')+

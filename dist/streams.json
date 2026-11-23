@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "generated_at": "2026-11-17T11:51:27.256Z",
-  "streams": [],
-  "checks": [],
   "providers": {
     "YouTube": {
-      "status": "not_configured",
-      "message": "APIキー未設定のため配信情報は未取得"
+      "status": "not_configured"
     }
-  }
+  },
+  "checks": [],
+  "resolutions": [],
+  "streams": []
 }

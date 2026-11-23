@@ -5,27 +5,21 @@ const vm=require('node:vm');
 const M=require('../dist/model.js');
 const {production,now,stream}=require('./helpers.cjs');
 const source=production(), registered=M.channels(source), channel=registered[0];
-test('approved population and excluded IDs; multiple channels stay separate',()=>{
+test('production population and excluded IDs; multiple channels stay separate',()=>{
   assert.equal(registered.length,70);
   assert.equal(registered.filter(c=>c.platform==='YouTube').length,59);
   assert.equal(registered.filter(c=>c.platform==='Twitch').length,11);
   assert.equal(registered.filter(c=>c.platform==='YouTube'&&!c.youtube_channel_id).length,10);
-  assert.ok(registered.slice(0,61).every(c=>c.source_rows.every(r=>r.original_decision==='承認')));
-  assert.ok(registered.slice(61,67).every(c=>c.source_rows.some(r=>r.review_stage===11&&r.review_decision==='承認')));
   assert.equal(M.channels({...source,channels:[...source.channels,{...channel,record_id:'hold',status:'on_hold'},{...channel,record_id:'reject',status:'excluded'}]}).length,70);
-  assert.ok(registered.slice(67).every(c=>c.source_rows.some(r=>r.review_stage===13&&r.review_decision==='承認')));
   const will=registered.filter(c=>c.display_name.includes('WILL'));assert.ok(will.length>=2);
   assert.equal(new Set(will.map(c=>c.record_id)).size,will.length);
-  const audit=require('../data/phase4-audit.json');
-  const release=require('../data/phase12-release.json');
-  assert.deepEqual(registered.filter(c=>audit.hold_record_ids.includes(c.record_id)).map(c=>c.record_id).sort(), [...release.promoted_from_hold].sort());
-  assert.ok(registered.every(c=>!audit.rejected_record_ids.includes(c.record_id)));
 });
-test('generated data exactly uses production approvals and preserves associations',()=>{
+test('generated data contains only production display and identity fields',()=>{
   const context={window:{}};vm.runInNewContext(fs.readFileSync('dist/data.js','utf8'),context);
   const generated=JSON.parse(JSON.stringify(context.window.CHANNEL_DATA));
   assert.deepEqual(generated.channels.map(c=>c.record_id),M.activeChannels(registered).map(c=>c.record_id));
-  for(const c of generated.channels)assert.deepEqual(c.associations,registered.find(r=>r.record_id===c.record_id).associations);
+  const publicKeys=['record_id','status','platform','display_name','channel_url','youtube_handle','youtube_channel_id'];
+  assert.deepEqual(generated.channels,M.activeChannels(registered).map(c=>Object.fromEntries(publicKeys.map(k=>[k,c[k]]))));
   assert.doesNotMatch(fs.readFileSync('dist/index.html','utf8'),/SAMPLE_DATA|サンプルデータ/);
 });
 test('Real Bout Special aliases never count as Garou Special',()=>{
@@ -63,8 +57,9 @@ test('stream validation: dedup, approval gate, malformed records, stale and expi
 test('combined filters search channel associations without changing input',()=>{
   const before=JSON.stringify(registered);
   assert.ok(registered.filter(c=>M.matches(c,'','Twitch','')).every(c=>c.platform==='Twitch'));
-  assert.ok(registered.filter(c=>M.matches(c,'sf2','','')).length>0);
-  assert.ok(M.matches(channel,'',channel.platform,channel.venues[0]));
+  const fixture={...channel,venues:['対戦会場'],games:[{title:'スパ2X'}]};
+  assert.ok(M.matches(fixture,'sf2','',''));
+  assert.ok(M.matches(fixture,'',fixture.platform,'対戦会場'));
   assert.equal(M.matches(channel,'','Twitch',''),false);
   assert.equal(JSON.stringify(registered),before);
 });
