@@ -1,0 +1,11 @@
+node_modules/
+.env
+*.log
+test-results/
+data/fetch-state.json
+artifacts/
+data/api-validation.json
+*.tmp
+.env.*
+*.map
+*.bundle

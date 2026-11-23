@@ -1,0 +1,127 @@
+name: Collect broadcast snapshot
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  schedule:
+    # UTC 15–23 and 00–07 = JST 00–16; UTC 08–14 = JST 17–23.
+    - cron: '7 0-7,15-23 * * *'
+    - cron: '7,17,27,37,47,57 8-14 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: broadcast-snapshot-${{ github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      deployable: ${{ steps.snapshot.outputs.deployable }}
+    env:
+      CACHE_SCOPE: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/streams.json
+            data/fetch-state.json
+          key: stream-v6-${{ env.CACHE_SCOPE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: stream-v6-${{ env.CACHE_SCOPE }}-
+      - run: npm run probe:auth
+        if: github.event_name != 'schedule'
+      - run: npm run validate:api
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      # Save quota/ID state immediately after collection, even if a later test fails.
+      - uses: actions/cache/save@v4
+        with:
+          path: |
+            data/streams.json
+            data/fetch-state.json
+          key: stream-v6-${{ env.CACHE_SCOPE }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - run: npm run audit:youtube
+        env:
+          REQUIRE_OWNERSHIP: '1'
+      - run: npm run build && npm test
+      - name: Check collected data
+        id: snapshot
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const {visible_now} = require('./artifacts/youtube-audit.json');
+          const snapshot = require('./data/streams.json');
+          const hasRecords = visible_now.total > 0;
+          const status = snapshot.providers.YouTube.status;
+          const deployable = status === 'ok' || (status === 'partial' && hasRecords);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `has_records=${hasRecords}\ndeployable=${deployable}\n`);
+          console.log(`YouTube status: ${status}; displayable records: ${visible_now.total}`);
+          NODE
+      - run: npm run prepare:https-preview
+        if: steps.snapshot.outputs.has_records == 'true'
+      - run: npm install --no-save --package-lock=false playwright@1.56.1
+        if: github.event_name != 'schedule'
+      - run: npx playwright install --with-deps chromium
+        if: github.event_name != 'schedule'
+      - run: npm run test:browser
+        if: github.event_name != 'schedule'
+      - uses: actions/upload-artifact@v4
+        if: always() && github.event_name != 'schedule'
+        with:
+          name: youtube-real-browser-screenshots
+          path: artifacts/*.png
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        if: steps.snapshot.outputs.has_records == 'true'
+        with:
+          name: youtube-browser-preview
+          path: artifacts/youtube-preview.html
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        if: steps.snapshot.outputs.has_records == 'true'
+        with:
+          name: https-preview-candidate
+          path: artifacts/https-preview/index.html
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portal-dist
+          path: dist/
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-validation
+          path: |
+            data/api-validation.json
+            artifacts/auth-probe.json
+            artifacts/youtube-audit.json
+            artifacts/browser-real-data.json
+            artifacts/file-preview-validation.json
+            artifacts/https-preview-report.json
+            artifacts/https-preview-browser.json
+          retention-days: 1
+
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event.repository.private == false && github.ref == 'refs/heads/main' && vars.PUBLISH_PAGES == 'true' && steps.snapshot.outputs.deployable == 'true'
+        with:
+          path: dist/
+  deploy:
+    needs: collect
+    if: github.event.repository.private == false && github.ref == 'refs/heads/main' && vars.PUBLISH_PAGES == 'true' && needs.collect.outputs.deployable == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
