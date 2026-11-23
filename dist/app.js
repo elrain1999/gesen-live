@@ -69,7 +69,15 @@
     let notice = error;
     if (!notice) {
       if (!snapshot.schema_version) notice = '配信情報を読み込み中…';
-      else if (provider === 'partial') notice = '一部の配信情報を確認できませんでした。';
+      else if (provider === 'partial') {
+        const checks=snapshot.checks||[];
+        const limited=checks.some(check=>check.status==='deferred');
+        const failed=checks.some(check=>['error','unresolved_id'].includes(check.status));
+        if (limited) notice = failed
+          ? '取得エラーが発生し、一部の確認を見送りました。'
+          : 'API制限により、一部の確認を見送りました。';
+        else notice = '一部の配信情報を確認できませんでした。';
+      }
       else if (provider !== 'ok') notice = '配信情報の更新に失敗しました。';
       else if (!Number.isFinite(generated) || generated > now + 300000) notice = '取得日時を確認できません。';
       else if (now - generated > 2 * 3600000) notice = '配信情報の更新が途絶えています。';

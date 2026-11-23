@@ -93,7 +93,7 @@ test('live cache expires after two hours even while the page is left open',()=>{
  assert.equal(M.streams({streams:[s]},[yt],Date.parse(now)).length,0);
 });
 
-test('search 429 retries at most twice with backoff and leaves recent and known live results usable',async()=>{
+test('search 429 retries once after a longer delay and leaves recent and known live results usable',async()=>{
  const calls=[], waits=[];
  const cached=stream(yt,{id:'known',fetched_at:'2026-11-17T09:00:00Z'});
  const video=(id)=>({id,snippet:{channelId:yt.youtube_channel_id,title:'エヌアイン完全世界'},liveStreamingDetails:{actualStartTime:now}});
@@ -105,11 +105,14 @@ test('search 429 retries at most twice with backoff and leaves recent and known 
    if(endpoint==='playlistItems')return reply({items:[{contentDetails:{videoId:'new'}}]});
    return reply({items:u.searchParams.get('id').split(',').map(video)});
  };
- const first=await Y.collect([yt],{key:'fixture',now,previous:[cached],fetcher,pause:async ms=>{waits.push(ms);}});
- assert.deepEqual(calls,['videos','channels','playlistItems','videos','search','search','search']);
- assert.deepEqual(waits.filter(ms=>ms>=1000),[1000,2000]);
- assert.deepEqual(first.telemetry.endpoints.search,{requests:3,rate_limits:3,retries:2});
+ let time=Date.parse(now);
+ const first=await Y.collect([yt],{key:'fixture',now,previous:[cached],fetcher,clock:()=>time,
+   pause:async ms=>{waits.push(ms);time+=ms;}});
+ assert.deepEqual(calls,['videos','channels','playlistItems','videos','search','search']);
+ assert.deepEqual(waits.filter(ms=>ms>=1000),[10000]);
+ assert.deepEqual(first.telemetry.endpoints.search,{requests:2,rate_limits:2,retries:1});
  assert.deepEqual(first.streams.map(s=>s.id),['known','new']);
+ assert.equal(first.checks.find(c=>c.kind==='live').status,'error');
  assert.equal(first.checks.find(c=>c.kind==='live').endpoint,'search');
  assert.equal(first.checks.find(c=>c.kind==='archive').status,'ok');
  assert.equal(first.checks.find(c=>c.kind==='upcoming').status,'deferred');
@@ -174,13 +177,17 @@ test('known live cache expires during an outage when no video detail has been co
 
 test('a successful 429 retry clears the warning while retaining the failed response count',async()=>{
  let searchCalls=0;
+ const waits=[];
+ let time=Date.parse(now);
  const fetcher=async url=>{
    const resource=new URL(url).pathname.split('/').pop();
    if(resource==='channels')return reply(metadata);
-   if(resource==='search'&&++searchCalls===1)return reply({},429);
+   if(resource==='search'&&++searchCalls===1)return reply({},429,{'retry-after':'12'});
    return reply({items:[]});
  };
- const result=await Y.collect([yt],{key:'fixture',now,fetcher});
+ const result=await Y.collect([yt],{key:'fixture',now,fetcher,clock:()=>time,
+   pause:async ms=>{waits.push(ms);time+=ms;}});
+ assert.deepEqual(waits.filter(ms=>ms>=1000),[12000,1000]);
  assert.equal(result.provider.status,'ok');
  assert.ok(result.checks.every(c=>c.status==='ok'));
  assert.equal(result.telemetry.recovered,1);

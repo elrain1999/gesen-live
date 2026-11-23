@@ -12,6 +12,7 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
   const retried=new Set();
   const deferred=error=>Object.assign(new APIError(error.message),error,{deferred:true});
   let fatal;
+  let nextSearchAt=0;
   return async function api(resource,params,record,runLimit=Infinity) {
     const stats=telemetry.endpoints[resource]??={requests:0,rate_limits:0,retries:0};
     const defer=Date.parse(next.cooldowns[resource]?.until);
@@ -27,7 +28,8 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
       throw deferred(error);
     }
     if(record&&(next.search_used>=80||telemetry.search_requests>=runLimit))return null;
-    const retries=retried.has(resource)?0:2;
+    const isSearch=resource==='search';
+    const retries=retried.has(resource)?0:isSearch?1:2;
     for(let retry=0;;retry++){
       if(record&&(next.search_used>=80||telemetry.search_requests>=runLimit))return null;
       if(resource==='search'){
@@ -39,7 +41,8 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
         }
         next.rest_used++;
       }
-      if(telemetry.requests)await pause(120);
+      if(telemetry.requests)await pause(Math.max(120,isSearch?nextSearchAt-clock():0));
+      if(isSearch)nextSearchAt=clock()+1000;
       stats.requests++;
       if(retry)stats.retries++;
       try{
@@ -60,8 +63,11 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
         stats.rate_limits++;
         const required=Math.max(0,(Date.parse(error.retry_at)||0)-clock());
         retried.add(resource);
-        if(retry<retries&&required<=3000&&(!record||(next.search_used<80&&telemetry.search_requests<runLimit))){
-          await pause(Math.max(required,1000*2**retry));
+        // Search gets one delayed retry per run. Longer server waits carry over to the next run.
+        const wait=Math.max(required,isSearch?10000:1000*2**retry);
+        const maxWait=isSearch?15000:3000;
+        if(retry<retries&&wait<=maxWait&&(!record||(next.search_used<80&&telemetry.search_requests<runLimit))){
+          await pause(wait);
           continue;
         }
         const until=new Date(clock()+Math.max(required,300000)).toISOString();

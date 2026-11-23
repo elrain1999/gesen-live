@@ -144,6 +144,13 @@ const {root,production}=require('./tests/helpers.cjs');
           {channel_id:active[2].record_id,kind:'live',status:'error'}]},
         '一部の配信情報を確認できませんでした。');
       assert.match(await page.locator('#updated').innerText(),/最終取得成功/);
+      for(const [statuses,message] of [
+        [['deferred'],'API制限により、一部の確認を見送りました。'],
+        [['error','deferred'],'取得エラーが発生し、一部の確認を見送りました。']
+      ]) {
+        await loadSnapshot({...empty,providers:{YouTube:{status:'partial'}},
+          checks:statuses.map(status=>({kind:'live',status}))},message);
+      }
       await loadSnapshot({...empty,providers:{YouTube:{status:'error'}}},'配信情報の更新に失敗しました。');
       await loadSnapshot(empty,'');
       assert.match(await page.locator('#results').innerText(),/条件に該当する配信情報がありません/);
