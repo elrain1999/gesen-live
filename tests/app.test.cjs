@@ -47,7 +47,7 @@ test('URL allowlists reject injected or unrelated links and thumbnails',()=>{
 test('stream validation: dedup, approval gate, malformed records, stale and expiry',()=>{
   const s=stream(channel);const get=a=>M.streams({streams:a},registered,Date.parse(now));
   assert.equal(get([s,s,null,{}, {...s,id:'excluded',channel_id:'unknown'}]).length,1);
-  assert.equal(get([{...s,fetched_at:'2026-11-17T08:00:00Z'}])[0].stale,true);
+  assert.equal(get([{...s,fetched_at:'2026-11-17T08:58:00Z'}])[0].stale,true);
   assert.equal(get([{...s,fetched_at:'2026-11-15T00:00:00Z'}]).length,0);
   assert.equal(get([{...s,starts_at:'broken'}]).length,0);
   assert.equal(get([{...s,status:'upcoming',starts_at:'2026-11-16T09:00:00Z'}]).length,0);

@@ -36,7 +36,8 @@
       seen.add(c.record_id); return true;
     });
   }
-  function streams(snapshot, registered, now=Date.now()) {
+  const liveMaxAge = 65 * 60000; // Hourly collection plus a short publishing grace period.
+  function streams(snapshot, registered, now=Date.now(), {keepUnconfirmedLive=false}={}) {
     const byId = new Map(registered.map(c => [c.record_id,c]));
     const seen = new Set();
     return (Array.isArray(snapshot?.streams) ? snapshot.streams : []).filter(s => {
@@ -45,7 +46,7 @@
       if (!c || typeof s.id !== 'string' || !s.id || seen.has(key) || !['live','upcoming','archive'].includes(s.status) || !safeUrl(s.url,c.platform) || typeof s.title !== 'string' || !Number.isFinite(Date.parse(s.starts_at)) || !Number.isFinite(Date.parse(s.fetched_at))) return false;
       if (now-Date.parse(s.fetched_at)>86400000 || Date.parse(s.fetched_at)>now+300000) return false;
       if (s.status==='archive' && now-Date.parse(s.starts_at)>30*86400000) return false;
-      if (s.status==='live' && Date.parse(s.fetched_at)+2*3600000<now) return false;
+      if (s.status==='live' && !keepUnconfirmedLive && now-Date.parse(s.fetched_at)>=liveMaxAge) return false;
       if (s.status==='upcoming' && Date.parse(s.ends_at || s.starts_at)<now) return false;
       seen.add(key); return true;
     }).map(s => ({...s, game: classify(s.title), stale: now-Date.parse(s.fetched_at)>3600000, channel:byId.get(s.channel_id)}));
@@ -55,5 +56,5 @@
       (!game || (game==='other' ? (channel.games||[]).some(g=>classify(g.title)==='unknown') : (channel.games||[]).some(g=>classify(g.title)===game)));
   }
   const activeChannels = registered => registered.filter(c=>c.platform==='YouTube');
-  return {games,classify,safeUrl,channels,streams,matches,activeChannels};
+  return {games,classify,safeUrl,channels,streams,matches,activeChannels,liveMaxAge};
 });

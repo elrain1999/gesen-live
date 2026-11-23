@@ -66,7 +66,7 @@
     const provider = snapshot.providers?.YouTube?.status;
     const generated = Date.parse(snapshot.generated_at);
     const rows=M.streams(snapshot,registered,now).filter(s=>states.has(s.status) && (!games.size || games.has(s.game)));
-    const stalled = snapshot.schema_version && now - generated > 2 * 3600000;
+    const stalled = snapshot.schema_version && now - generated >= M.liveMaxAge;
     let notice = stalled ? '更新が止まっています。現在のライブ配信状況は確認できません。' : error;
     if (!notice) {
       if (!snapshot.schema_version) notice = '配信情報を読み込み中…';
