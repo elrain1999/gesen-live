@@ -32,14 +32,14 @@ const {root,production}=require('./tests/helpers.cjs');
     const stamp=Date.now(), iso=ms=>new Date(stamp+ms).toISOString();
     const fixture={schema_version:1,generated_at:iso(0),providers:{YouTube:{status:'ok'}},checks:[],streams:[]};
     for(const [id,status,title,viewers,start] of [
-      ['aaa00000001','live','ガロスペ <img src=x>',null,-10000],
+      ['aaa00000001','live','ガロスペ・KOF98 <img src=x>',null,-10000],
       ['aaa00000002','live','真サム 対戦',0,-20000],
       ['aaa00000003','live','北斗の拳 対戦',32,-30000],
-      ['aaa00000004','upcoming','ガロスペ 予定',null,86400000],
+      ['aaa00000004','upcoming','ガロスペ・KOF98 予定',null,86400000],
       ['aaa00000005','archive','真サム 過去',null,-3600000],
       ['aaa00000006','archive','RBSP（餓狼伝説SPECIAL）大会',null,-3600000],
-      ['aaa00000007','archive','KOF98 店舗対戦',null,-3600000],
-      ['aaa00000008','archive','3rd STRIKE 対戦',null,-3600000],
+      ['aaa00000007','archive','ガロスペ・KOF98 店舗対戦',null,-3600000],
+      ['aaa00000008','archive','3rd STRIKE / SFZ3 / GGXX 対戦',null,-3600000],
       ['aaa00000009','archive','CvS2 対戦',null,-3600000],
       ['aaa00000010','archive','ヴァンパイアセイヴァー 対戦',null,-3600000],
       ['aaa00000011','archive','スパ2X 対戦',null,-3600000]]){
@@ -96,11 +96,19 @@ const {root,production}=require('./tests/helpers.cjs');
       await popup.waitForURL(fixture.streams[0].url);
       await popup.close();
       await page.click('#games-toggle');
-      assert.equal(await page.locator('#games button').count(),8);
+      assert.deepEqual(await page.locator('#games button').allTextContents(),[
+        'すべて','餓狼伝説SPECIAL','真サムライスピリッツ','ストリートファイターIII 3rd STRIKE',
+        'CAPCOM VS. SNK 2','ヴァンパイアセイヴァー','ストリートファイターIIシリーズ','北斗の拳',
+        'ストリートファイターZEROシリーズ','ザ・キング・オブ・ファイターズシリーズ',
+        'ギルティギアシリーズ','餓狼伝説シリーズ','サムライスピリッツシリーズ'
+      ]);
+      await page.setViewportSize({width:360,height:844});
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      await page.setViewportSize({width:390,height:844});
       await page.click('[data-game=garousp]');await page.click('[data-game=shinsam]');await page.click('#games-toggle');
-      assert.equal(await page.locator('.card').count(),4);
+      assert.equal(await page.locator('.card').count(),5);
       await page.click('[data-state=live]');
-      assert.equal(await page.locator('.card').count(),2);
+      assert.equal(await page.locator('.card').count(),3);
       await page.click('[data-state=archive]');await page.click('[data-state=upcoming]');
       assert.equal(await page.locator('.card').count(),0);
       assert.match(await page.locator('#results').innerText(),/該当する配信情報がありません/);
@@ -115,15 +123,22 @@ const {root,production}=require('./tests/helpers.cjs');
       await page.click('[data-state=archive]');
       await page.click('[data-state=upcoming]');
       for(const [game,expected] of [
-        ['garousp',2],['shinsam',2],['third',1],['cvs2',1],
-        ['savior',1],['sf2',1],['hokuto',1]
+        ['garousp',3],['shinsam',2],['third',1],['cvs2',1],
+        ['savior',1],['sf2',1],['hokuto',1],['sfzero',1],['kof',3],
+        ['guiltygear',1],['fatalfury',4],['samuraispirits',2]
       ]){
         await page.click('[data-game="'+game+'"]');
         assert.equal(await page.locator('.card').count(),expected,game);
         await page.click('[data-game=""]');
       }
+      await page.click('[data-game=garousp]');
+      await page.click('[data-game=kof]');
+      for(const state of ['live','upcoming','archive']){
+        assert.equal(await page.locator('#'+state+' .card').count(),1);
+      }
+      await page.click('[data-game=""]');
       assert.equal(await page.locator('.card').count(),11);
-      assert.ok(await page.getByText('KOF98 店舗対戦',{exact:true}).isVisible());
+      assert.ok(await page.getByText('ガロスペ・KOF98 店舗対戦',{exact:true}).isVisible());
       await page.click('#games-toggle');
       const empty={...fixture,streams:[]};
       const loadSnapshot=async(snapshot,status,count=0)=>{
