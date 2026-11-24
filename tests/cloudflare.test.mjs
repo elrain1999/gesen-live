@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs';
 import {test} from 'node:test';
 import worker,{isRecent,isScheduledSlot,runScheduled} from '../cloudflare/worker.mjs';
 import {collectionMode} from '../scripts/collection-mode.mjs';
+import {checkDeployment} from '../cloudflare/check-deployment.mjs';
 
 const minute=60000;
 const now=Date.parse('2026-11-24T08:14:00Z');
@@ -162,4 +163,41 @@ test('recent failure does not repeat YouTube requests or deploy a failed cache',
   assert.equal(await collectionMode(snapshot(now-8*minute),{...mock,publish:true}),'fetch');
   assert.equal(await collectionMode(snapshot(now+minute),{...mock,publish:true}),'fetch');
   assert.equal(await collectionMode({}, {...mock,publish:true}),'fetch');
+});
+
+test('deployment preflight and verification use only the named Worker and preserve the Secret',async()=>{
+  const calls=[];
+  const accountId='a'.repeat(32);
+  const fetcher=async(url,options)=>{
+    calls.push(url);
+    assert.equal(options.headers.authorization,'Bearer '+token);
+    assert.equal(options.method,undefined);
+    assert.equal(options.redirect,'error');
+    const result=url.endsWith('/schedules')
+      ? {schedules:[{cron:eveningCron},{cron:hourlyCron}]}
+      : {name:'GITHUB_DISPATCH_TOKEN',type:'secret_text'};
+    return {ok:true,json:async()=>({success:true,result})};
+  };
+  const base=`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/gesen-live-scheduler`;
+  const options={accountId,token,fetcher};
+  await checkDeployment('preflight',options);
+  assert.deepEqual(calls,[base+'/secrets/GITHUB_DISPATCH_TOKEN']);
+  await checkDeployment('verify',options);
+  assert.deepEqual(calls.slice(1),[base+'/secrets/GITHUB_DISPATCH_TOKEN',base+'/schedules']);
+});
+
+test('deployment checks stop on missing credentials, inaccessible Worker or incorrect Cron',async()=>{
+  const accountId='a'.repeat(32);
+  const noNetwork=()=>assert.fail('request should be skipped');
+  await assert.rejects(checkDeployment('preflight',{accountId,fetcher:noNetwork}),/CLOUDFLARE_API_TOKEN/);
+  await assert.rejects(checkDeployment('preflight',{token,fetcher:noNetwork}),/CLOUDFLARE_ACCOUNT_ID/);
+  const rejected=async()=>({ok:false,status:403,json:async()=>assert.fail('error body should not be read')});
+  await assert.rejects(checkDeployment('preflight',{accountId,token,fetcher:rejected}),/HTTP 403/);
+  const invalid=async url=>({ok:true,json:async()=>({
+    success:true,result:url.endsWith('/schedules')?{schedules:[{cron:eveningCron}]}
+      :{name:'GITHUB_DISPATCH_TOKEN',type:'secret_text'}
+  })});
+  await assert.rejects(checkDeployment('verify',{accountId,token,fetcher:invalid}),/two expected UTC Cron/);
+  const unexpected=async()=>({ok:true,json:async()=>({success:true,result:{name:'GITHUB_DISPATCH_TOKEN',type:'plain_text'}})});
+  await assert.rejects(checkDeployment('preflight',{accountId,token,fetcher:unexpected}),/registered as a Secret/);
 });
