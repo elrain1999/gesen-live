@@ -57,23 +57,17 @@ const {root,production}=require('./tests/helpers.cjs');
       await page.waitForFunction(()=>!document.getElementById('fetch-status').textContent.includes('読み込み中'));
       assert.equal(await page.locator('.card').count(),baseline.length);
       const banner=page.locator('#top-banner');
-      const hasBanner=Boolean(await banner.getAttribute('data-sources'));
       const fallbackTitle=page.locator('header h1');
       const checkRatio=()=>banner.evaluate(image=>Math.abs(image.clientHeight-image.clientWidth*image.naturalHeight/image.naturalWidth)<2);
-      if(hasBanner){
-        await banner.waitFor({state:'visible'});
-        assert.match(await banner.getAttribute('src'),/ryu-terry\.webp$/);
-      } else {
-        assert.equal(await banner.getAttribute('src'),null);
-        assert.ok((await fallbackTitle.boundingBox()).width>1);
-      }
+      await banner.waitFor({state:'visible'});
+      assert.match(await banner.getAttribute('src'),/ryu-terry\.webp$/);
       for(const width of [360,375,390,768,1440]){
         await page.setViewportSize({width,height:844});
         assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-        if(hasBanner)assert.ok(await checkRatio());
+        assert.ok(await checkRatio());
       }
       await page.setViewportSize({width:390,height:844});
-      if(hasBanner && prefix==='/'){
+      if(prefix==='/'){
         for(const [draw,filename] of [[0.5,'geese-bison.webp'],[0.9,'chun-li-mai.webp']]){
           await page.evaluate(value=>sessionStorage.setItem('testBannerDraw',value),String(draw));
           await page.reload({waitUntil:'domcontentloaded'});
