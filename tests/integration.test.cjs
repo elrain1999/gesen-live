@@ -291,10 +291,12 @@ test('scheduled collection and Pages deployment are wired on main',()=>{
  const workflow=fs.readFileSync('.github/workflows/update.yml','utf8');
  const cron=[...workflow.matchAll(/^    - cron: '([^']+)'$/gm)].map(match=>match[1]);
  assert.deepEqual(cron,['17 0-7,15-23 * * *','7,17,27,37,47,57 8-14 * * *','32 * * * *']);
+ assert.match(workflow,/^  workflow_dispatch:\n    inputs:\n      cloudflare:[\s\S]*?type: boolean\n        default: false/m);
+ assert.match(workflow,/^      AUTOMATED_COLLECTION: .*github\.event_name == 'schedule'.*github\.event_name == 'workflow_dispatch' && inputs\.cloudflare == true/m);
  assert.match(workflow,/^  schedule:\n(?:    #.*\n)*    - cron:/m);
  assert.match(workflow,/^  check_backup:\n    if: .*github\.event\.schedule == '32 \* \* \* \*'.*refs\/heads\/main.*PUBLISH_PAGES/m);
  assert.match(workflow,/^  collect:\n    needs: check_backup\n    if: >-[\s\S]*?!cancelled\(\).*github\.event_name != 'schedule'[\s\S]*?needs\.check_backup\.result != 'skipped' && needs\.check_backup\.outputs\.refresh != 'false'/m);
- assert.match(workflow,/^      - run: npm run validate:api\n        env:/m);
+ assert.match(workflow,/^      - run: npm run validate:api\n        if: steps\.recent\.outputs\.mode != 'reuse' && steps\.recent\.outputs\.mode != 'skip'\n        env:/m);
  assert.match(workflow,/^  deploy:\n    needs: collect\n    if: >-[\s\S]*?!cancelled\(\) && needs\.collect\.result == 'success'[\s\S]*?refs\/heads\/main[\s\S]*?needs\.collect\.outputs\.deployable == 'true'/m);
 });
 

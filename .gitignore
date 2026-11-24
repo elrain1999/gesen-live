@@ -7,5 +7,8 @@ artifacts/
 data/api-validation.json
 *.tmp
 .env.*
+.dev.vars
+.dev.vars.*
+.wrangler/
 *.map
 *.bundle

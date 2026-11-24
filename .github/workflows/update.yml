@@ -1,6 +1,12 @@
 name: Collect broadcast snapshot
+run-name: Collect broadcast snapshot (${{ github.event_name == 'workflow_dispatch' && inputs.cloudflare && 'cloudflare' || github.event_name }})
 on:
   workflow_dispatch:
+    inputs:
+      cloudflare:
+        description: Use the automatic collection path for Cloudflare Cron
+        type: boolean
+        default: false
   push:
     branches: [main]
   schedule:
@@ -42,13 +48,14 @@ jobs:
       deployable: ${{ steps.snapshot.outputs.deployable }}
     env:
       CACHE_SCOPE: ${{ github.ref_name }}
+      AUTOMATED_COLLECTION: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.cloudflare == true) }}
     steps:
       - name: Log trigger
         env:
           TRIGGER_EVENT: ${{ github.event_name }}
           TRIGGER_CRON: ${{ github.event.schedule }}
         run: |
-          printf 'Trigger: %s %s\n' "$TRIGGER_EVENT" "$TRIGGER_CRON"
+          printf 'Trigger: %s %s (automatic=%s)\n' "$TRIGGER_EVENT" "$TRIGGER_CRON" "$AUTOMATED_COLLECTION"
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -62,24 +69,35 @@ jobs:
             data/fetch-state.json
           key: stream-v6-${{ env.CACHE_SCOPE }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: stream-v6-${{ env.CACHE_SCOPE }}-
+      - name: Check recent automatic collection
+        id: recent
+        if: env.AUTOMATED_COLLECTION == 'true' && github.repository == 'elrain1999/gesen-live' && github.ref == 'refs/heads/main'
+        run: node scripts/collection-mode.mjs
+        env:
+          PUBLISH_PAGES: ${{ vars.PUBLISH_PAGES }}
       - run: npm run probe:auth
-        if: github.event_name != 'schedule'
+        if: env.AUTOMATED_COLLECTION != 'true'
       - run: npm run validate:api
+        if: steps.recent.outputs.mode != 'reuse' && steps.recent.outputs.mode != 'skip'
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       # Save quota/ID state immediately after collection, even if a later test fails.
       - uses: actions/cache/save@v4
+        if: steps.recent.outputs.mode != 'reuse' && steps.recent.outputs.mode != 'skip'
         with:
           path: |
             data/streams.json
             data/fetch-state.json
           key: stream-v6-${{ env.CACHE_SCOPE }}-${{ github.run_id }}-${{ github.run_attempt }}
       - run: npm run audit:youtube
+        if: steps.recent.outputs.mode != 'skip'
         env:
           REQUIRE_OWNERSHIP: '1'
       - run: npm run build && npm test
+        if: steps.recent.outputs.mode != 'skip'
       - name: Check collected data
         id: snapshot
+        if: steps.recent.outputs.mode != 'skip'
         run: |
           node <<'NODE'
           const fs = require('node:fs');
@@ -94,13 +112,13 @@ jobs:
       - run: npm run prepare:https-preview
         if: steps.snapshot.outputs.has_records == 'true'
       - run: npm install --no-save --package-lock=false playwright@1.56.1
-        if: github.event_name != 'schedule'
+        if: env.AUTOMATED_COLLECTION != 'true'
       - run: npx playwright install --with-deps chromium
-        if: github.event_name != 'schedule'
+        if: env.AUTOMATED_COLLECTION != 'true'
       - run: npm run test:browser
-        if: github.event_name != 'schedule'
+        if: env.AUTOMATED_COLLECTION != 'true'
       - uses: actions/upload-artifact@v4
-        if: always() && github.event_name != 'schedule'
+        if: always() && env.AUTOMATED_COLLECTION != 'true'
         with:
           name: youtube-real-browser-screenshots
           path: artifacts/*.png
@@ -118,12 +136,13 @@ jobs:
           path: artifacts/https-preview/index.html
           retention-days: 1
       - uses: actions/upload-artifact@v4
+        if: steps.recent.outputs.mode != 'skip'
         with:
           name: portal-dist
           path: dist/
           retention-days: 1
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.recent.outputs.mode != 'skip'
         with:
           name: api-validation
           path: |
