@@ -4,6 +4,17 @@
 
 Cloudflare は **Workers Free** を使います。独自ドメイン、クレジットカード登録、Workers Paid、Git 連携は不要です。料金プランを選ぶ画面では Free を選びます。Workers Free の Cron Trigger 上限はアカウント全体で5件で、この Worker は2件使います。 [Workers Free](https://www.cloudflare.com/products/workers/) · [利用上限](https://developers.cloudflare.com/workers/platform/limits/)
 
+## 登録済みの Worker を GitHub Actions から配備する
+
+`gesen-live-scheduler` が作成済みで、Worker Secret `GITHUB_DISPATCH_TOKEN` も登録済みなら、この手順でコード編集画面を使わずに更新できます。配備ワークフローを含む第26工程の変更が `main` にマージされてから実施します。
+
+1. Cloudflare の対象アカウントで **Manage account → Account API tokens → Create Token** を開きます。短い有効期限を設定し、**Individual Workers → Editor** のポリシーで `gesen-live-scheduler` だけを選びます。Worker の作成権限やゾーン権限は不要です。同じアカウントの **Account ID** を控えます。 [Account API tokens](https://developers.cloudflare.com/fundamentals/api/get-started/account-owned-tokens/) · [Worker 単位の権限](https://developers.cloudflare.com/workers/authorization/workers/) · [Account ID の確認](https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/)
+2. GitHub の `elrain1999/gesen-live` で **Settings → Secrets and variables → Actions** を開きます。**Secrets → New repository secret** で `CLOUDFLARE_API_TOKEN` に今回発行した Cloudflare トークンを登録し、**Variables → New repository variable** で `CLOUDFLARE_ACCOUNT_ID` に Account ID を登録します。Cloudflare トークンの貼り付け先は GitHub の Secret 欄です。既存の GitHub PAT は Cloudflare の Worker Secret に保管したまま使います。 [GitHub Actions の設定画面](https://github.com/elrain1999/gesen-live/settings/secrets/actions)
+3. GitHub の **Actions → Deploy scheduler Worker → Run workflow** で `main` を選び、**Run workflow** を1回押します。ログで Wrangler の配備と `Existing Worker Secret binding and both UTC Cron Triggers verified` を確認します。Cron 2本は Wrangler が登録します。 [配備ワークフロー](https://github.com/elrain1999/gesen-live/actions/workflows/deploy-scheduler.yml)
+4. Cloudflare の **Settings → Trigger Events → View events** で自然起動を確認し、[運用手順](cloudflare-operations.md) に沿って GitHub の `(cloudflare)` 実行と公開時刻を照合します。Worker の HTTP 公開ルートは配備設定で無効になります。Cron の確認にはダッシュボードを使います。
+
+配備と Cron 登録を確認したら、今回の Cloudflare API トークンを失効させ、GitHub の `CLOUDFLARE_API_TOKEN` を削除できます。外部定期起動は Worker に登録済みの `GITHUB_DISPATCH_TOKEN` を使います。
+
 ## GitHub で専用トークンを発行する
 
 1. リポジトリ所有者の `elrain1999` で GitHub にログインします。右上のプロフィール画像から **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token** を開きます。 [Fine-grained tokens](https://github.com/settings/personal-access-tokens)
