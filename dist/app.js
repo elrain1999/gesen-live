@@ -8,7 +8,6 @@
   const labels = {live:'ライブ',upcoming:'予定',archive:'アーカイブ'};
   const states = new Set(Object.keys(labels));
   const games = new Set();
-  const shortNames = {garousp:'ガロスペ',shinsam:'真サム',cvs2:'カプエス2',sf2:'ストリートファイターII系'};
   const snapshotPreview = window.RETRO_RING_OFFLINE_SNAPSHOT;
   let snapshot = snapshotPreview || {};
   let error = '';
@@ -19,7 +18,7 @@
   const gamePanel = byId('games');
   for (const [id,label] of [['','すべて'],...M.games]) {
     const button = document.createElement('button');
-    button.textContent = shortNames[id] || label;
+    button.textContent = label;
     button.dataset.game = id;
     gamePanel.append(button);
   }
@@ -65,7 +64,7 @@
     const now = Date.now();
     const provider = snapshot.providers?.YouTube?.status;
     const generated = Date.parse(snapshot.generated_at);
-    const rows=M.streams(snapshot,registered,now).filter(s=>states.has(s.status) && (!games.size || games.has(s.game)));
+    const rows=M.streams(snapshot,registered,now).filter(s=>states.has(s.status) && (!games.size || s.game.some(tag=>games.has(tag))));
     const stalled = snapshot.schema_version && now - generated >= M.liveMaxAge;
     let notice = stalled ? '更新が止まっています。現在のライブ配信状況は確認できません。' : error;
     if (!notice) {
