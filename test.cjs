@@ -15,8 +15,9 @@ const {root,production}=require('./tests/helpers.cjs');
       const requestPath=new URL(req.url,'http://localhost').pathname;
       const pathname=requestPath.startsWith(projectPath) ? requestPath.slice(projectPath.length-1) : requestPath;
       const name=pathname==='/'?'index.html':pathname.slice(1);
-      if(!['index.html','about.html','style.css','model.js','data.js','app.js','streams.json'].includes(name)){res.writeHead(404);res.end();return;}
-      try{const body=await fs.readFile(path.join(root,'dist',name));res.setHeader('Content-Type',({'.js':'text/javascript','.css':'text/css','.json':'application/json','.html':'text/html'})[path.extname(name)]);res.end(body);}catch{res.writeHead(500);res.end();}
+      if(!['index.html','about.html','style.css','model.js','data.js','app.js','streams.json','analytics-config.js','analytics.js'].includes(name) &&
+         !/^banners\/[a-z0-9-]+\.webp$/.test(name)){res.writeHead(404);res.end();return;}
+      try{const body=await fs.readFile(path.join(root,'dist',name));res.setHeader('Content-Type',({'.js':'text/javascript','.css':'text/css','.json':'application/json','.html':'text/html','.webp':'image/webp'})[path.extname(name)]);res.end(body);}catch{res.writeHead(500);res.end();}
     });
     await new Promise((resolve,reject)=>{host.once('error',reject);host.listen(0,'127.0.0.1',resolve);});
     const options={headless:true,args:['--no-sandbox']};
@@ -32,14 +33,14 @@ const {root,production}=require('./tests/helpers.cjs');
     const stamp=Date.now(), iso=ms=>new Date(stamp+ms).toISOString();
     const fixture={schema_version:1,generated_at:iso(0),providers:{YouTube:{status:'ok'}},checks:[],streams:[]};
     for(const [id,status,title,viewers,start] of [
-      ['aaa00000001','live','ガロスペ <img src=x>',null,-10000],
+      ['aaa00000001','live','ガロスペ・KOF98 <img src=x>',null,-10000],
       ['aaa00000002','live','真サム 対戦',0,-20000],
       ['aaa00000003','live','北斗の拳 対戦',32,-30000],
-      ['aaa00000004','upcoming','ガロスペ 予定',null,86400000],
+      ['aaa00000004','upcoming','ガロスペ・KOF98 予定',null,86400000],
       ['aaa00000005','archive','真サム 過去',null,-3600000],
       ['aaa00000006','archive','RBSP（餓狼伝説SPECIAL）大会',null,-3600000],
-      ['aaa00000007','archive','KOF98 店舗対戦',null,-3600000],
-      ['aaa00000008','archive','3rd STRIKE 対戦',null,-3600000],
+      ['aaa00000007','archive','ガロスペ・KOF98 店舗対戦',null,-3600000],
+      ['aaa00000008','archive','3rd STRIKE / SFZ3 / GGXX 対戦',null,-3600000],
       ['aaa00000009','archive','CvS2 対戦',null,-3600000],
       ['aaa00000010','archive','ヴァンパイアセイヴァー 対戦',null,-3600000],
       ['aaa00000011','archive','スパ2X 対戦',null,-3600000]]){
@@ -51,19 +52,48 @@ const {root,production}=require('./tests/helpers.cjs');
       const page=await browser.newPage({viewport:{width:390,height:844}});
       const errors=[];
       page.on('pageerror',e=>errors.push(String(e)));
+      await page.addInitScript(()=>{Math.random=()=>Number(sessionStorage.getItem('testBannerDraw')??'0.1');});
       await page.goto(base+prefix,{waitUntil:'domcontentloaded'});
       await page.waitForFunction(()=>!document.getElementById('fetch-status').textContent.includes('読み込み中'));
       assert.equal(await page.locator('.card').count(),baseline.length);
+      const banner=page.locator('#top-banner');
+      const fallbackTitle=page.locator('header h1');
+      const checkRatio=()=>banner.evaluate(image=>Math.abs(image.clientHeight-image.clientWidth*image.naturalHeight/image.naturalWidth)<2);
+      await banner.waitFor({state:'visible'});
+      assert.match(await banner.getAttribute('src'),/ryu-terry\.webp$/);
       for(const width of [360,375,390,768,1440]){
         await page.setViewportSize({width,height:844});
         assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+        assert.ok(await checkRatio());
       }
       await page.setViewportSize({width:390,height:844});
+      if(prefix==='/'){
+        for(const [draw,filename] of [[0.5,'geese-bison.webp'],[0.9,'chun-li-mai.webp']]){
+          await page.evaluate(value=>sessionStorage.setItem('testBannerDraw',value),String(draw));
+          await page.reload({waitUntil:'domcontentloaded'});
+          await banner.waitFor({state:'visible'});
+          assert.equal(await banner.getAttribute('src'),'banners/'+filename);
+          assert.ok(await checkRatio());
+          await page.fill('#archive-search','対戦');
+          assert.equal(await banner.getAttribute('src'),'banners/'+filename);
+          await page.fill('#archive-search','');
+        }
+        await page.route('**/banners/*.webp',route=>route.abort());
+        await page.reload();
+        assert.equal(await banner.isVisible(),false);
+        assert.ok((await fallbackTitle.boundingBox()).width>1);
+        assert.ok(await page.locator('#about-link').isVisible());
+        await page.unroute('**/banners/*.webp');
+        await page.reload();
+        await banner.waitFor({state:'visible'});
+      }
       await page.screenshot({path:path.join(root,'artifacts/mobile-portal.png'),timeout:15000});
       await page.click('#about-link');
       assert.equal(await page.locator('h1').innerText(),'このサイトについて');
       assert.equal(await page.getByText('配信元一覧',{exact:true}).count(),0);
-      assert.equal(await page.locator('main a').count(),1);
+      assert.ok(await page.locator('#analytics-disabled').isVisible());
+      assert.equal(await page.locator('#analytics-enabled').isVisible(),false);
+      assert.equal(await page.locator('main a[href="https://www.cloudflare.com/policies/privacy/"]').count(),1);
       await page.click('.back');
       let online=true;
       let responseSnapshot=fixture;
@@ -96,11 +126,19 @@ const {root,production}=require('./tests/helpers.cjs');
       await popup.waitForURL(fixture.streams[0].url);
       await popup.close();
       await page.click('#games-toggle');
-      assert.equal(await page.locator('#games button').count(),8);
+      assert.deepEqual(await page.locator('#games button').allTextContents(),[
+        'すべて','餓狼伝説SPECIAL','真サムライスピリッツ','ストリートファイターIII 3rd STRIKE',
+        'CAPCOM VS. SNK 2','ヴァンパイアセイヴァー','ストリートファイターIIシリーズ','北斗の拳',
+        'ストリートファイターZEROシリーズ','ザ・キング・オブ・ファイターズシリーズ',
+        'ギルティギアシリーズ','餓狼伝説シリーズ','サムライスピリッツシリーズ'
+      ]);
+      await page.setViewportSize({width:360,height:844});
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      await page.setViewportSize({width:390,height:844});
       await page.click('[data-game=garousp]');await page.click('[data-game=shinsam]');await page.click('#games-toggle');
-      assert.equal(await page.locator('.card').count(),4);
+      assert.equal(await page.locator('.card').count(),5);
       await page.click('[data-state=live]');
-      assert.equal(await page.locator('.card').count(),2);
+      assert.equal(await page.locator('.card').count(),3);
       await page.click('[data-state=archive]');await page.click('[data-state=upcoming]');
       assert.equal(await page.locator('.card').count(),0);
       assert.match(await page.locator('#results').innerText(),/該当する配信情報がありません/);
@@ -115,15 +153,38 @@ const {root,production}=require('./tests/helpers.cjs');
       await page.click('[data-state=archive]');
       await page.click('[data-state=upcoming]');
       for(const [game,expected] of [
-        ['garousp',2],['shinsam',2],['third',1],['cvs2',1],
-        ['savior',1],['sf2',1],['hokuto',1]
+        ['garousp',3],['shinsam',2],['third',1],['cvs2',1],
+        ['savior',1],['sf2',1],['hokuto',1],['sfzero',1],['kof',3],
+        ['guiltygear',1],['fatalfury',4],['samuraispirits',2]
       ]){
         await page.click('[data-game="'+game+'"]');
         assert.equal(await page.locator('.card').count(),expected,game);
         await page.click('[data-game=""]');
       }
+      await page.click('[data-game=garousp]');
+      await page.click('[data-game=kof]');
+      for(const state of ['live','upcoming','archive']){
+        assert.equal(await page.locator('#'+state+' .card').count(),1);
+      }
+      await page.click('[data-game=""]');
       assert.equal(await page.locator('.card').count(),11);
-      assert.ok(await page.getByText('KOF98 店舗対戦',{exact:true}).isVisible());
+      assert.ok(await page.getByText('ガロスペ・KOF98 店舗対戦',{exact:true}).isVisible());
+      const archiveSearch=page.getByRole('searchbox',{name:'アーカイブのタイトル検索'});
+      await page.click('[data-game=kof]');
+      await archiveSearch.fill('  ｋｏｆ９８　店舗  ');
+      assert.equal(await page.locator('#archive h2 small').textContent(),'1件');
+      assert.ok(await page.locator('#archive').getByText('ガロスペ・KOF98 店舗対戦').isVisible());
+      assert.equal(await page.locator('#live h2 small').textContent(),'1件');
+      assert.equal(await page.locator('#upcoming h2 small').textContent(),'1件');
+      await page.click('[data-game=shinsam]');
+      await page.click('[data-game=kof]');
+      assert.equal(await page.locator('#archive h2 small').textContent(),'0件');
+      await page.click('[data-game=""]');
+      await page.click('[data-state=archive]');
+      assert.equal(await archiveSearch.isVisible(),false);
+      await page.click('[data-state=archive]');
+      await archiveSearch.fill('');
+      assert.equal(await page.locator('#archive h2 small').textContent(),'7件');
       await page.click('#games-toggle');
       const empty={...fixture,streams:[]};
       const loadSnapshot=async(snapshot,status,count=0)=>{
@@ -133,6 +194,13 @@ const {root,production}=require('./tests/helpers.cjs');
         assert.equal(await page.locator('.card').count(),count);
       };
       const staleTime=iso(-67*60000);
+      const otherGame={...fixture.streams[4],title:'SOUND VOLTEX 店舗配信'};
+      await loadSnapshot({...fixture,streams:fixture.streams.map(row=>row.id===otherGame.id?otherGame:row)},'',11);
+      await page.locator('#archive').getByText(otherGame.title).waitFor();
+      await archiveSearch.fill('sound voltex');
+      assert.equal(await page.locator('#archive h2 small').textContent(),'1件');
+      assert.ok(await page.locator('#archive').getByText(otherGame.title).isVisible());
+      await archiveSearch.fill('');
       const stalledNotice='更新が止まっています。現在のライブ配信状況は確認できません。';
       await loadSnapshot({...fixture,generated_at:staleTime,last_success_at:staleTime,providers:{YouTube:{status:'partial'}},
         streams:fixture.streams.map(row=>({...row,fetched_at:staleTime}))},stalledNotice,8);
@@ -165,6 +233,35 @@ const {root,production}=require('./tests/helpers.cjs');
       assert.deepEqual(errors,[]);
       await page.close();
     }
+    const analyticsPage=await browser.newPage();
+    const analyticsRequests=[];
+    let analyticsToken='';
+    await analyticsPage.route('https://elrain1999.github.io/**',route=>{
+      const pathname=new URL(route.request().url()).pathname;
+      if(pathname.endsWith('/analytics-config.js')){
+        return route.fulfill({contentType:'application/javascript',body:'window.CLOUDFLARE_WEB_ANALYTICS_TOKEN = '+JSON.stringify(analyticsToken)+';'});
+      }
+      return route.fulfill({path:path.join(root,'dist',pathname.endsWith('/analytics.js')?'analytics.js':'about.html')});
+    });
+    await analyticsPage.route('https://static.cloudflareinsights.com/**',route=>{
+      analyticsRequests.push(route.request().url());
+      return route.fulfill({contentType:'application/javascript',body:'window.testBeacon = document.currentScript.dataset.cfBeacon;'});
+    });
+    const productionAbout='https://elrain1999.github.io/gesen-live/about.html';
+    await analyticsPage.goto(productionAbout);
+    assert.ok(await analyticsPage.locator('#analytics-disabled').isVisible());
+    assert.deepEqual(analyticsRequests,[]);
+    analyticsToken='a'.repeat(32);
+    await analyticsPage.reload();
+    await analyticsPage.waitForFunction(()=>Boolean(window.testBeacon));
+    assert.deepEqual(JSON.parse(await analyticsPage.evaluate(()=>window.testBeacon)),{token:analyticsToken});
+    assert.deepEqual(analyticsRequests,['https://static.cloudflareinsights.com/beacon.min.js']);
+    assert.ok(await analyticsPage.locator('#analytics-enabled').isVisible());
+    assert.equal(await analyticsPage.locator('#analytics-disabled').isVisible(),false);
+    await analyticsPage.goto('https://elrain1999.github.io/other-project/about.html');
+    assert.ok(await analyticsPage.locator('#analytics-disabled').isVisible());
+    assert.equal(analyticsRequests.length,1);
+    await analyticsPage.close();
     await fs.writeFile(path.join(root,'artifacts/browser-real-data.json'),JSON.stringify(report,null,2));
     if(baseline.length){
       for(const [location,reportName] of [
@@ -183,7 +280,8 @@ const {root,production}=require('./tests/helpers.cjs');
         const about=page.locator('#offline-about:visible');
         await about.waitFor();
         assert.equal(await about.getByText('配信元一覧',{exact:true}).count(),0);
-        assert.equal(await about.locator('a').count(),1);
+        assert.ok(await about.locator('#analytics-disabled').isVisible());
+        assert.equal(await about.locator('#analytics-enabled').isVisible(),false);
         await page.locator('.back').click();await page.locator('#offline-about').waitFor({state:'hidden'});assert.equal(await page.locator('#offline-about').isVisible(),false);
         await page.clock.install({time:new Date()});
         await page.clock.setSystemTime(new Date(Date.parse(sourceSnapshot.generated_at)+25*3600000));

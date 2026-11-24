@@ -5,21 +5,31 @@
 })(typeof globalThis === 'object' ? globalThis : this, function() {
   'use strict';
   const games = [
-    ['garousp','餓狼伝説SPECIAL', /餓狼伝説\s*special|ガロスペ|fatal fury special/i],
-    ['shinsam','真サムライスピリッツ', /真サムライ|真サム|samurai shodown\s*(?:ii|2)\b/i],
+    ['garousp','餓狼伝説SPECIAL', /餓狼伝説\s*(?:special|スペシャル|sp\b)|ガロスペ|fatal\s+fury\s+special/i, 'fatalfury'],
+    ['shinsam','真サムライスピリッツ', /真サム|真[・\s]*侍魂|\bsamurai\s+shodown\s*(?:ii|2)\b/i, 'samuraispirits'],
     ['third','ストリートファイターIII 3rd STRIKE', /3rd\s*strike|スト(?:リートファイター)?(?:III|3)(?:\s*3rd|サード)|ストIII|サード|\b3rd\b/i],
     ['cvs2','CAPCOM VS. SNK 2', /capcom\s*vs\.?\s*snk\s*2|カプエス\s*2|\bcvs\s*2\b/i],
     ['savior','ヴァンパイアセイヴァー', /ヴァンパイアセイヴァー|バンパイアセイバー|セイヴァー|vampire savior|darkstalkers\s*3/i],
-    ['sf2','ストリートファイターIIシリーズ', /ストリートファイター(?:ii|Ⅱ)(?!i)|スパ(?:2|ii|Ⅱ)|スト(?:2|ii|Ⅱ)(?!i)|street fighter\s*ii(?!i)|super turbo|\bssf2x\b/i],
-    ['hokuto','北斗の拳', /北斗の拳|hokuto no ken|fist of the north star/i]
+    ['sf2','ストリートファイターIIシリーズ', /ストリートファイター(?:ii(?!i)|2(?!\d))|(?<![ァ-ヺー])(?:スパ|スト)(?:2(?!\d)|ii(?!i))|street fighter\s*ii(?!i)|super turbo|\bssf2x\b/i],
+    ['hokuto','北斗の拳', /北斗の拳|hokuto no ken|fist of the north star/i],
+    ['sfzero','ストリートファイターZEROシリーズ', /(?:ストリートファイター|(?<![ァ-ヺー])スト)\s*(?:zero|ゼロ)|\bstreet\s+fighter\s+(?:zero[123]?|alpha[123]?)(?![a-z0-9])|\b(?:zero[123]|sf[az][123])(?![a-z0-9])/i],
+    ['kof','ザ・キング・オブ・ファイターズシリーズ', /(?:ザ[・\s]*)?キング[・\s]*オブ[・\s]*ファイターズ|\b(?:the\s+)?king\s+of\s+fighters|\bkof(?:[\s'’.-]*(?:(?:19)?(?:9[4-9])|(?:20)?0[0-3]|1[1-5]|xi{1,3}|xiv|xv|neowave|maximum\s*impact)(?:um|fe|unlimited\s*match)?)?(?![a-z0-9])/i],
+    ['guiltygear','ギルティギアシリーズ', /ギルティ[・\s]*ギア|\bguilty\s*gear|\bgg(?:xrd(?:\s*rev\s*[12])?|xx(?:\s*ac(?:pr)?)?|x|st|acpr)(?![a-z0-9])/i],
+    ['fatalfury','餓狼伝説シリーズ', /餓狼伝説|餓狼\s*(?:mow|[-–\s]*garou)|\bfatal\s+fury\b|\bgarou\s*[:–-]?\s*mark\s+of\s+the\s+wolves|\breal[\s-]*bout(?:\s+special|\s*2)\b|リアル[\s・-]*バウト|\brb(?:sp|2|[\s・-]*special)\b/i],
+    ['samuraispirits','サムライスピリッツシリーズ', /サムライ[・\s]*スピリッツ|\bsamurai\s+(?:shodown|spirits)\b|(?:零|三)サム/i]
   ];
   // The longer Real Bout title can contain the entire Fatal Fury Special alias.
-  const realBoutTitle = /(?:(?:リアル[\s・-]*バウト|\breal[\s-]*bout\b)(?:[\s・-]*special)?|\brb(?:sp|[\s・-]*special)?\b)[\s・:()\[\]【】-]*(?:餓狼伝説\s*(?:special|スペシャル)|fatal\s+fury\s+special|ガロスペ)/gi;
+  const realBoutTitle = /(?:(?:リアル[\s・-]*バウト|\breal[\s-]*bout\b)(?:[\s・-]*special)?|\brb(?:sp|[\s・-]*special)?\b)[\s・:()\[\]【】-]*(?:餓狼伝説\s*(?:special|スペシャル|sp\b)|fatal\s+fury\s+special|ガロスペ)/gi;
   const classify = title => {
     const normalized = String(title || '').normalize('NFKC');
     const fatalFury = normalized.replace(realBoutTitle, ' ');
-    const hits = games.filter(([id,,pattern]) => pattern.test(id === 'garousp' ? fatalFury : normalized));
-    return hits.length === 1 ? hits[0][0] : 'unknown';
+    const tags = new Set();
+    for (const [id,,pattern,series] of games) {
+      if (!pattern.test(id === 'garousp' ? fatalFury : normalized)) continue;
+      tags.add(id);
+      if (series) tags.add(series);
+    }
+    return games.map(([id])=>id).filter(id=>tags.has(id));
   };
   function safeUrl(value, platform, image=false) {
     try {
@@ -53,7 +63,10 @@
   }
   function matches(channel, game, platform, query) {
     return (!platform || channel.platform === platform) && (!query || [channel.display_name,...(channel.venues||[]),...(channel.events||[])].join(' ').normalize('NFKC').toLowerCase().includes(query.normalize('NFKC').toLowerCase())) &&
-      (!game || (game==='other' ? (channel.games||[]).some(g=>classify(g.title)==='unknown') : (channel.games||[]).some(g=>classify(g.title)===game)));
+      (!game || (channel.games||[]).some(({title})=>{
+        const tags=classify(title);
+        return game==='other' ? tags.length===0 : tags.includes(game);
+      }));
   }
   const activeChannels = registered => registered.filter(c=>c.platform==='YouTube');
   return {games,classify,safeUrl,channels,streams,matches,activeChannels,liveMaxAge};

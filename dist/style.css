@@ -3,6 +3,10 @@
 body { margin:0; background:var(--bg); color:var(--ink) }
 header, main { width:min(100% - 32px,1120px); margin:auto }
 header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px 16px; padding:18px 0 12px; border-bottom:1px solid var(--line) }
+#top-banner { width:min(100%,680px); height:auto; display:block; margin:0 auto; border-radius:8px }
+header.banner-ready { flex-direction:column; align-items:stretch; gap:0; padding:8px 0 0 }
+header.banner-ready h1 { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap }
+header.banner-ready #about-link { align-self:flex-end }
 h1 { font-size:clamp(1.28rem,4vw,2rem); margin:0; letter-spacing:-.04em }
 h1 span { color:var(--accent); margin-left:.12em }
 a { color:var(--accent); text-underline-offset:4px }
@@ -19,6 +23,8 @@ button[aria-pressed=true]::before { content:'✓ '; }
 .controls label,.stamp,.meta { color:var(--muted); font-size:.82rem }
 #games-toggle::after { content:' ▾' } #games-toggle[aria-expanded=true]::after { content:' ▴' }
 #games { margin-top:10px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; max-width:680px }
+.archive-search { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; margin-top:10px; color:var(--muted); font-size:.82rem }
+.archive-search input { width:min(100%,18rem); min-height:44px; font:inherit; font-size:1rem; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:6px 12px }
 .stamp { margin:10px 0 }
 #fetch-status:empty { display:none }
 h2 { font-size:1.16rem; margin:24px 0 10px; border-left:4px solid var(--accent); padding-left:10px }

@@ -28,16 +28,29 @@ test('Real Bout Special aliases never count as Garou Special',()=>{
     'リアルバウト餓狼伝説スペシャル', 'Real Bout Fatal Fury Special',
     'REAL BOUT SPECIAL', 'RB SPECIAL', 'RBSP', 'ＲＢＳＰ（餓狼伝説ＳＰＥＣＩＡＬ）',
     'RB-SPECIAL: Fatal Fury Special', 'リアルバウト餓狼伝説2', '餓狼伝説3'
-  ]) assert.equal(M.classify(title),'unknown',title);
-  assert.equal(M.classify('Fatal Fury Special'),'garousp');
-  assert.equal(M.classify('RBSP / 餓狼伝説SPECIAL'),'garousp');
-  assert.equal(M.classify('REAL BOUT 餓狼伝説SPECIAL / 3rd STRIKE'),'third');
+  ]) assert.deepEqual(M.classify(title),['fatalfury'],title);
+  assert.deepEqual(M.classify('Fatal Fury Special'),['garousp','fatalfury']);
+  assert.deepEqual(M.classify('RBSP / 餓狼伝説SPECIAL'),['garousp','fatalfury']);
+  assert.deepEqual(M.classify('REAL BOUT 餓狼伝説SPECIAL / 3rd STRIKE'),['third','fatalfury']);
+  assert.deepEqual(M.classify('REAL BOUT 餓狼伝説SP'),['fatalfury']);
   const streamTitle = 'REAL BOUT 餓狼伝説SPECIAL 対戦会';
-  assert.equal(M.streams({streams:[stream(channel,{title:streamTitle})]},registered,Date.parse(now))[0].game,'unknown');
-  assert.equal(M.games.length,7);
+  assert.deepEqual(M.streams({streams:[stream(channel,{title:streamTitle})]},registered,Date.parse(now))[0].game,['fatalfury']);
 });
 test('conservative game classification accepts unknown and does not mix similar games',()=>{
-  for(const [title,id] of [['ガロスペ','garousp'],['餓狼伝説SPECIAL','garousp'],['真サム対戦','shinsam'],['3rd STRIKE','third'],['カプエス2','cvs2'],['ヴァンパイアセイヴァー','savior'],['スパⅡX','sf2'],['北斗の拳','hokuto'],['餓狼MOW','unknown'],['ヴァンパイアハンター','unknown'],['SF6','unknown'],['ガロスペ / スパ2X','unknown']])assert.equal(M.classify(title),id,title);
+  for(const [title,id] of [['ガロスペ','garousp'],['餓狼伝説SPECIAL','garousp'],['真サム対戦','shinsam'],['3rd STRIKE','third'],['カプエス2','cvs2'],['ヴァンパイアセイヴァー','savior'],['スパⅡX','sf2'],['北斗の拳','hokuto']])assert.ok(M.classify(title).includes(id),title);
+  for(const title of ['ヴァンパイアハンター','SF6','X ST GG 98','GG BOYZ','ラスト2試合','ロックマンゼロ3','KOFAX'])assert.deepEqual(M.classify(title),[],title);
+});
+test('independent titles and series can coexist as unique tags',()=>{
+  for(const [title,tags] of [
+    ['ガロスペ・KOF98対戦会',['garousp','kof','fatalfury']],
+    ['真サム・3rd大会',['shinsam','third','samuraispirits']],
+    ['ガロスペ / スパ2X',['garousp','sf2','fatalfury']],
+    ['餓狼MOW',['fatalfury']],
+    ['Street Fighter Alpha 3 / GGXrd REV2',['sfzero','guiltygear']],
+    ['サムライスピリッツ零SP / ＫＯＦ２００２ＵＭ',['kof','samuraispirits']],
+    ['ガロスペ / Fatal Fury Special',['garousp','fatalfury']]
+  ])assert.deepEqual(M.classify(title),tags,title);
+  assert.deepEqual(M.games.map(([id])=>id),['garousp','shinsam','third','cvs2','savior','sf2','hokuto','sfzero','kof','guiltygear','fatalfury','samuraispirits']);
 });
 test('URL allowlists reject injected or unrelated links and thumbnails',()=>{
   for(const value of ['javascript:alert(1)','http://youtube.com/','https://youtube.com.evil.test/',new URL('/', 'https://' + ['user:pass', 'youtube.com'].join('@')).href,'https://example.com/'])assert.equal(M.safeUrl(value,'YouTube'),null);
@@ -59,6 +72,10 @@ test('combined filters search channel associations without changing input',()=>{
   assert.ok(registered.filter(c=>M.matches(c,'','Twitch','')).every(c=>c.platform==='Twitch'));
   const fixture={...channel,venues:['対戦会場'],games:[{title:'スパ2X'}]};
   assert.ok(M.matches(fixture,'sf2','',''));
+  const mixed={...fixture,games:[{title:'真サム・3rd大会'}]};
+  assert.ok(M.matches(mixed,'third','',''));
+  assert.ok(M.matches(mixed,'samuraispirits','',''));
+  assert.equal(M.matches(mixed,'other','',''),false);
   assert.ok(M.matches(fixture,'',fixture.platform,'対戦会場'));
   assert.equal(M.matches(channel,'','Twitch',''),false);
   assert.equal(JSON.stringify(registered),before);

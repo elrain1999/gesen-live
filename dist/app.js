@@ -8,8 +8,18 @@
   const labels = {live:'ライブ',upcoming:'予定',archive:'アーカイブ'};
   const states = new Set(Object.keys(labels));
   const games = new Set();
-  const shortNames = {garousp:'ガロスペ',shinsam:'真サム',cvs2:'カプエス2',sf2:'ストリートファイターII系'};
   const snapshotPreview = window.RETRO_RING_OFFLINE_SNAPSHOT;
+  if (!snapshotPreview) {
+    const banner = byId('top-banner');
+    const sources = banner.dataset.sources.split(/\s+/).filter(Boolean);
+    if (sources.length) {
+      banner.addEventListener('load', () => {
+        banner.hidden = false;
+        banner.parentElement.classList.add('banner-ready');
+      }, {once:true});
+      banner.src = sources[Math.floor(Math.random() * sources.length)];
+    }
+  }
   let snapshot = snapshotPreview || {};
   let error = '';
   let registered;
@@ -17,9 +27,11 @@
   catch { byId('fetch-status').textContent='配信元一覧を読み込めませんでした。'; return; }
 
   const gamePanel = byId('games');
+  const archiveSearch = byId('archive-search');
+  const searchText = text => text.normalize('NFKC').toLowerCase();
   for (const [id,label] of [['','すべて'],...M.games]) {
     const button = document.createElement('button');
-    button.textContent = shortNames[id] || label;
+    button.textContent = label;
     button.dataset.game = id;
     gamePanel.append(button);
   }
@@ -44,6 +56,7 @@
     event.currentTarget.setAttribute('aria-expanded', String(!gamePanel.hidden));
   };
   byId('sort').onchange = render;
+  archiveSearch.addEventListener('input', render);
   byId('results').addEventListener('error', event => {
     if(event.target.matches('img')) event.target.hidden=true;
   },true);
@@ -62,10 +75,12 @@
     for (const b of byId('states').children) b.setAttribute('aria-pressed',String(states.has(b.dataset.state)));
     for (const b of gamePanel.children) b.setAttribute('aria-pressed',String(b.dataset.game ? games.has(b.dataset.game) : !games.size));
     byId('games-toggle').textContent=games.size?'ゲーム選択（'+games.size+'）':'ゲーム選択';
+    archiveSearch.parentElement.hidden = !states.has('archive');
+    const keywords = searchText(archiveSearch.value).trim().split(/\s+/).filter(Boolean);
     const now = Date.now();
     const provider = snapshot.providers?.YouTube?.status;
     const generated = Date.parse(snapshot.generated_at);
-    const rows=M.streams(snapshot,registered,now).filter(s=>states.has(s.status) && (!games.size || games.has(s.game)));
+    const rows=M.streams(snapshot,registered,now).filter(s=>states.has(s.status) && (!games.size || s.game.some(tag=>games.has(tag))));
     const stalled = snapshot.schema_version && now - generated >= M.liveMaxAge;
     let notice = stalled ? '更新が止まっています。現在のライブ配信状況は確認できません。' : error;
     if (!notice) {
@@ -91,7 +106,12 @@
       (provider!=='ok'&&snapshot.last_success_at?' · 最終取得成功 '+formatTime(snapshot.last_success_at):'');
     const sort=byId('sort').value;
     const html=Object.entries(labels).filter(([state])=>states.has(state)).map(([state,label])=>{
-      const items=rows.filter(row=>row.status===state).sort((a,b)=>{
+      const items=rows.filter(row=>{
+        if (row.status !== state) return false;
+        if (state !== 'archive' || !keywords.length) return true;
+        const title = searchText(row.title);
+        return keywords.every(keyword=>title.includes(keyword));
+      }).sort((a,b)=>{
         if(state==='live' && sort==='viewers'){
           const difference=(b.concurrent_viewers??-1)-(a.concurrent_viewers??-1);
           if(difference) return difference;
@@ -99,7 +119,11 @@
         const difference=Date.parse(b.starts_at)-Date.parse(a.starts_at);
         return (state==='upcoming' && sort==='viewers' ? -difference : difference) || a.id.localeCompare(b.id);
       });
-      if(!items.length)return '';
+      if(!items.length){
+        return state==='archive' && keywords.length && snapshot.schema_version
+          ? '<section id="archive"><h2>アーカイブ<small>0件</small></h2><p>条件に該当するアーカイブがありません。</p></section>'
+          : '';
+      }
       return '<section id="'+state+'"><h2>'+label+'<small>'+items.length+'件</small></h2><div class="grid">'+items.map(card).join('')+'</div></section>';
     }).join('') || (notice && states.size ? '<p>現在の配信件数は未確認です。</p>' : '<p>条件に該当する配信情報がありません。</p>');
     const results=byId('results');
