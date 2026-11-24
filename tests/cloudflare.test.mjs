@@ -72,11 +72,12 @@ test('stale Pages dispatches main with the Cloudflare flag and logs acceptance o
   const [probe,dispatch]=mock.calls;
   assert.equal(new URL(probe.url).origin,'https://elrain1999.github.io');
   assert.equal(probe.options.headers.authorization,undefined);
+  assert.equal(probe.options.redirect,'manual');
   assert.equal(dispatch.url,dispatchUrl);
   assert.equal(dispatch.options.headers.authorization,'Bearer '+token);
-  assert.equal(dispatch.options.redirect,'error');
+  assert.equal(dispatch.options.redirect,'manual');
   assert.deepEqual(JSON.parse(dispatch.options.body),{ref:'main',inputs:{cloudflare:'true'},return_run_details:true});
-  assert.deepEqual(mock.logs.at(-1),['github_dispatch_accepted',new Date(now).toISOString(),204]);
+  assert.deepEqual(mock.logs.at(-1),['github_dispatch_accepted',new Date(now).toISOString(),204,{elapsed_ms:0}]);
   assert.doesNotMatch(JSON.stringify(mock.logs),new RegExp(token));
 });
 
@@ -105,24 +106,49 @@ test('missing credentials fail without network access',async()=>{
   assert.equal(mock.calls.length,0);
 });
 
-test('dispatch failures report only safe statuses and do not retry an ambiguous request',async()=>{
-  for(const status of [401,403,404,422,429,503,new Error(token)]){
+test('dispatch HTTP errors and redirects record status without following or retrying',async()=>{
+  for(const status of [302,401,403,404,422,429,503]){
     const mock=mockNetwork(null,status);
-    const reason=status instanceof Error?'github_dispatch_unconfirmed':'github_dispatch_rejected';
-    await assert.rejects(runScheduled(event,env,mock),new RegExp(reason));
+    await assert.rejects(runScheduled(event,env,mock),/^Error: github_dispatch_rejected$/);
     assert.equal(mock.calls.length,2);
-    assert.equal(mock.logs.at(-1)[0],reason);
-    if(typeof status==='number') assert.equal(mock.logs.at(-1).at(-1),status);
+    assert.deepEqual(mock.logs.at(-1),['github_dispatch_rejected',new Date(now).toISOString(),status,{
+      category:status===302?'redirect_refused':'http_rejected',elapsed_ms:0
+    }]);
     assert.doesNotMatch(JSON.stringify(mock.logs),new RegExp(token));
   }
+});
+
+test('dispatch exceptions record safe diagnostics and elapsed time without retrying',async()=>{
+  const cases=[
+    [new Error(token),'Error','fetch_error'],
+    [Object.assign(new Error(token),{name:token}),'UnknownError','fetch_error'],
+    [new TypeError('Invalid redirect value '+token),'TypeError','invalid_redirect'],
+    [new TypeError('Network connection failed '+token),'TypeError','network_error'],
+    [new DOMException(token,'AbortError'),'AbortError','aborted'],
+    [new DOMException(token,'TimeoutError'),'TimeoutError','timeout']
+  ];
+  for(const [error,exception,category] of cases){
+    const mock=mockNetwork(null,error);
+    let reading=now;
+    await assert.rejects(runScheduled(event,env,{...mock,now:()=>{reading+=75;return reading;}}),
+      /^Error: github_dispatch_unconfirmed$/);
+    assert.equal(mock.calls.length,2);
+    assert.deepEqual(mock.logs.at(-1),['github_dispatch_unconfirmed',new Date(now).toISOString(),{
+      exception,category,timeout:category==='timeout',elapsed_ms:75
+    }]);
+    assert.doesNotMatch(JSON.stringify(mock.logs),new RegExp(token));
+  }
+});
+
+test('dispatch accepts a 200 response and logs only a valid numeric run ID',async()=>{
   const detailed=mockNetwork(null,200);
   await runScheduled(event,env,detailed);
-  assert.equal(detailed.logs.at(-1).at(-1),200);
+  assert.deepEqual(detailed.logs.at(-1),['github_dispatch_accepted',new Date(now).toISOString(),200,{elapsed_ms:0}]);
   const fetcher=async(url,options)=>options.method==='POST'?{
     status:200,json:async()=>({workflow_run_id:123,html_url:token})
   }:{ok:false};
   await runScheduled(event,env,{...detailed,fetcher});
-  assert.deepEqual(detailed.logs.at(-1),['github_dispatch_accepted',new Date(now).toISOString(),200,123]);
+  assert.deepEqual(detailed.logs.at(-1),['github_dispatch_accepted',new Date(now).toISOString(),200,123,{elapsed_ms:0}]);
   assert.doesNotMatch(JSON.stringify(detailed.logs),new RegExp(token));
 });
 
