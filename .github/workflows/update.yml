@@ -5,15 +5,37 @@ on:
     branches: [main]
   schedule:
     # UTC 15–23 and 00–07 = JST 00–16; UTC 08–14 = JST 17–23.
-    - cron: '7 0-7,15-23 * * *'
+    - cron: '17 0-7,15-23 * * *'
     - cron: '7,17,27,37,47,57 8-14 * * *'
+    # Extra opportunity on the same scheduler. Collect only when Pages is stale.
+    - cron: '32 * * * *'
 permissions:
   contents: read
 concurrency:
   group: broadcast-snapshot-${{ github.ref_name }}
   cancel-in-progress: false
 jobs:
+  check_backup:
+    if: github.event_name == 'schedule' && github.event.schedule == '32 * * * *' && github.repository == 'elrain1999/gesen-live' && github.event.repository.private == false && github.ref == 'refs/heads/main' && vars.PUBLISH_PAGES == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      refresh: ${{ steps.freshness.outputs.refresh }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: freshness
+        run: node scripts/check-schedule-backup.cjs
   collect:
+    needs: check_backup
+    if: >-
+      !cancelled() && (github.event_name != 'schedule' ||
+      github.event.schedule != '32 * * * *' ||
+      (needs.check_backup.result != 'skipped' && needs.check_backup.outputs.refresh != 'false'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -21,6 +43,12 @@ jobs:
     env:
       CACHE_SCOPE: ${{ github.ref_name }}
     steps:
+      - name: Log trigger
+        env:
+          TRIGGER_EVENT: ${{ github.event_name }}
+          TRIGGER_CRON: ${{ github.event.schedule }}
+        run: |
+          printf 'Trigger: %s %s\n' "$TRIGGER_EVENT" "$TRIGGER_CRON"
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -114,7 +142,10 @@ jobs:
           path: dist/
   deploy:
     needs: collect
-    if: github.event.repository.private == false && github.ref == 'refs/heads/main' && vars.PUBLISH_PAGES == 'true' && needs.collect.outputs.deployable == 'true'
+    if: >-
+      !cancelled() && needs.collect.result == 'success' &&
+      github.event.repository.private == false && github.ref == 'refs/heads/main' &&
+      vars.PUBLISH_PAGES == 'true' && needs.collect.outputs.deployable == 'true'
     runs-on: ubuntu-latest
     permissions:
       pages: write

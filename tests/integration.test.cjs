@@ -5,6 +5,7 @@ const Y=require('../scripts/providers/youtube.cjs'),T=require('../scripts/provid
 const {merge,main}=require('../scripts/update.cjs');
 const {request}=require('../scripts/providers/http.cjs');
 const {report}=require('../scripts/validate-api.cjs');
+const {checkPublishedSnapshot}=require('../scripts/check-schedule-backup.cjs');
 const {production,now,stream}=require('./helpers.cjs');
 const all=production().channels, yt=all.find(c=>c.youtube_channel_id),tw=all.find(c=>c.platform==='Twitch');
 const reply=(data,status=200,headers={})=>({ok:status>=200&&status<300,status,headers:{get:key=>headers[key]??null},json:async()=>data});
@@ -289,11 +290,43 @@ test('live search uses an existing slot to check for a follow-on broadcast',asyn
 test('scheduled collection and Pages deployment are wired on main',()=>{
  const workflow=fs.readFileSync('.github/workflows/update.yml','utf8');
  const cron=[...workflow.matchAll(/^    - cron: '([^']+)'$/gm)].map(match=>match[1]);
- assert.deepEqual(cron,['7 0-7,15-23 * * *','7,17,27,37,47,57 8-14 * * *']);
+ assert.deepEqual(cron,['17 0-7,15-23 * * *','7,17,27,37,47,57 8-14 * * *','32 * * * *']);
  assert.match(workflow,/^  schedule:\n(?:    #.*\n)*    - cron:/m);
- assert.match(workflow,/^  collect:\n    runs-on:/m);
+ assert.match(workflow,/^  check_backup:\n    if: .*github\.event\.schedule == '32 \* \* \* \*'.*refs\/heads\/main.*PUBLISH_PAGES/m);
+ assert.match(workflow,/^  collect:\n    needs: check_backup\n    if: >-[\s\S]*?!cancelled\(\).*github\.event_name != 'schedule'[\s\S]*?needs\.check_backup\.result != 'skipped' && needs\.check_backup\.outputs\.refresh != 'false'/m);
  assert.match(workflow,/^      - run: npm run validate:api\n        env:/m);
- assert.match(workflow,/^  deploy:\n    needs: collect\n    if: [^\n]*refs\/heads\/main[^\n]*needs.collect.outputs.deployable/m);
+ assert.match(workflow,/^  deploy:\n    needs: collect\n    if: >-[\s\S]*?!cancelled\(\) && needs\.collect\.result == 'success'[\s\S]*?refs\/heads\/main[\s\S]*?needs\.collect\.outputs\.deployable == 'true'/m);
+});
+
+test('backup checks the last published success at the current JST cadence',async()=>{
+ for(const [time,maxAge] of [['2026-11-24T07:59:59Z',60],['2026-11-24T08:00:00Z',10],
+   ['2026-11-24T14:59:59Z',10],['2026-11-24T15:00:00Z',60]]){
+   const checkedAt=Date.parse(time);
+   for(const [age,refresh] of [[maxAge*60000-1,false],[maxAge*60000,true]]){
+     const decision=await checkPublishedSnapshot({now:()=>checkedAt,key:'test-1',fetcher:async(url,options)=>{
+       assert.equal(url.href,'https://elrain1999.github.io/gesen-live/streams.json?schedule_check=test-1');
+       assert.equal(options.cache,'no-store');
+       return reply({schema_version:1,generated_at:time,last_success_at:new Date(checkedAt-age).toISOString()});
+     }});
+     assert.equal(decision.refresh,refresh,time);
+   }
+ }
+});
+
+test('backup allows collection when Pages cannot prove a recent success',async()=>{
+ const now=()=>Date.parse('2026-11-24T00:32:00Z');
+ const time='2026-11-24T00:31:59Z';
+ for(const [fetcher,reason] of [
+   [async()=>reply({},503),'pages_http_error'],
+   [async()=>{throw Error('network');},'pages_check_failed'],
+   [async()=>({ok:true,json:async()=>{throw Error('invalid JSON');}}),'pages_check_failed'],
+   [async()=>reply({schema_version:1,generated_at:time,last_success_at:null}),'invalid_snapshot'],
+   [async()=>reply({schema_version:1,generated_at:'2026-11-24T00:33:00Z',last_success_at:time}),'invalid_snapshot'],
+   [async()=>reply({schema_version:1,generated_at:time,last_success_at:'2026-11-24T00:32:00Z'}),'invalid_snapshot'],
+   [async()=>reply({schema_version:1,generated_at:time,last_success_at:'2026-11-23T23:30:00Z'}),'last_success_stale']
+ ]){
+   assert.deepEqual(await checkPublishedSnapshot({now,fetcher}),{refresh:true,reason});
+ }
 });
 
 test('Actions logs count deferred live channels separately and redact untrusted 429 payloads',async t=>{
