@@ -142,7 +142,10 @@ jobs:
           path: dist/
   deploy:
     needs: collect
-    if: github.event.repository.private == false && github.ref == 'refs/heads/main' && vars.PUBLISH_PAGES == 'true' && needs.collect.outputs.deployable == 'true'
+    if: >-
+      !cancelled() && needs.collect.result == 'success' &&
+      github.event.repository.private == false && github.ref == 'refs/heads/main' &&
+      vars.PUBLISH_PAGES == 'true' && needs.collect.outputs.deployable == 'true'
     runs-on: ubuntu-latest
     permissions:
       pages: write

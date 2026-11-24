@@ -295,7 +295,7 @@ test('scheduled collection and Pages deployment are wired on main',()=>{
  assert.match(workflow,/^  check_backup:\n    if: .*github\.event\.schedule == '32 \* \* \* \*'.*refs\/heads\/main.*PUBLISH_PAGES/m);
  assert.match(workflow,/^  collect:\n    needs: check_backup\n    if: >-[\s\S]*?!cancelled\(\).*github\.event_name != 'schedule'[\s\S]*?needs\.check_backup\.result != 'skipped' && needs\.check_backup\.outputs\.refresh != 'false'/m);
  assert.match(workflow,/^      - run: npm run validate:api\n        env:/m);
- assert.match(workflow,/^  deploy:\n    needs: collect\n    if: [^\n]*refs\/heads\/main[^\n]*needs.collect.outputs.deployable/m);
+ assert.match(workflow,/^  deploy:\n    needs: collect\n    if: >-[\s\S]*?!cancelled\(\) && needs\.collect\.result == 'success'[\s\S]*?refs\/heads\/main[\s\S]*?needs\.collect\.outputs\.deployable == 'true'/m);
 });
 
 test('backup checks the last published success at the current JST cadence',async()=>{
