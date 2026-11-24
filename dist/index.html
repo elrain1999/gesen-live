@@ -4,8 +4,12 @@
 <title>ゲーセン対戦台LIVE</title>
 <link rel="stylesheet" href="style.css">
 <script src="model.js" defer></script><script src="data.js" defer></script><script src="app.js" defer></script>
+<script src="analytics-config.js" defer></script><script src="analytics.js" defer></script>
 </head><body>
-<header><h1>ゲーセン対戦台<span>LIVE</span></h1><a id="about-link" href="about.html">このサイトについて</a></header>
+<header>
+<img id="top-banner" width="1280" height="640" alt="" hidden data-sources="">
+<h1>ゲーセン対戦台<span>LIVE</span></h1><a id="about-link" href="about.html">このサイトについて</a>
+</header>
 <main>
 <section class="filters" aria-label="配信の絞り込み">
 <div id="states" role="group" aria-label="配信状態">
@@ -14,6 +18,8 @@
 <div class="controls"><button id="games-toggle" aria-expanded="false" aria-controls="games">ゲーム選択</button>
 <label>並び順 <select id="sort"><option value="viewers">同時視聴者数順</option><option value="time">配信開始順（新しい順）</option></select></label></div>
 <div id="games" role="group" aria-label="ゲームタイトル" hidden></div>
+<label class="archive-search" for="archive-search">アーカイブのタイトル検索
+<input id="archive-search" type="search" placeholder="例：ガロスペ 対戦会"></label>
 </section>
 <p class="stamp" id="updated"></p><p id="fetch-status" role="status"></p>
 <div id="results"></div><noscript>配信一覧を表示するにはJavaScriptを有効にしてください。</noscript>
