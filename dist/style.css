@@ -48,7 +48,15 @@ h3 { margin:0 0 4px; font-size:1rem; overflow-wrap:anywhere; line-height:1.45 }
 @media(max-width:540px){ .grid{grid-template-columns:1fr} .card{display:grid;grid-template-columns:36% minmax(0,1fr); align-items:center} .thumb{border-radius:5px;margin-left:7px} .body{padding:9px} h3{font-size:.94rem} .meta{font-size:.76rem} }
 @media(max-width:540px) {
   #top-banner { aspect-ratio:25 / 11; object-fit:cover; object-position:center top }
+  .controls { gap:6px }
+  .controls label { display:flex; align-items:center; gap:4px; white-space:nowrap }
+  .controls button, .controls select { font-size:.8rem; padding-inline:6px }
   .stamp, #about-link { font-size:.75rem }
   .stamp-zone { display:none }
   .stamp-zone-short { display:inline; margin-left:.3em; text-decoration:none }
+}
+@media(max-width:360px) {
+  .controls { gap:4px }
+  .controls label { gap:3px }
+  .controls button, .controls select { font-size:.75rem; padding-inline:4px }
 }

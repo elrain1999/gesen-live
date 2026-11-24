@@ -58,6 +58,12 @@ const {root,production}=require('./tests/helpers.cjs');
       assert.equal(await page.locator('.card').count(),baseline.length);
       const banner=page.locator('#top-banner');
       const fallbackTitle=page.locator('header h1');
+      const controlsFit=()=>page.evaluate(()=>{
+        const game=document.querySelector('#games-toggle').getBoundingClientRect();
+        const sort=document.querySelector('#sort').getBoundingClientRect();
+        return game.top===sort.top && game.right<sort.left && sort.right<=innerWidth &&
+          game.height>=44 && sort.height>=44;
+      });
       const checkBannerHeight=width=>banner.evaluate((image,mobile)=>{
         const expectedHeight=image.clientWidth*image.naturalHeight/image.naturalWidth*(mobile ? .88 : 1);
         return Math.abs(image.clientHeight-expectedHeight)<2 &&
@@ -65,9 +71,10 @@ const {root,production}=require('./tests/helpers.cjs');
       },width<=540);
       await banner.waitFor({state:'visible'});
       assert.match(await banner.getAttribute('src'),/ryu-terry\.webp$/);
-      for(const width of [320,360,375,390,768,1440]){
+      for(const width of [320,360,361,375,390,768,1440]){
         await page.setViewportSize({width,height:844});
         assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+        assert.ok(await controlsFit(),`controls share a row at ${width}px`);
         assert.ok(await checkBannerHeight(width),width);
         assert.ok(await page.evaluate(()=>{
           const stamp=document.querySelector('header #updated').getBoundingClientRect();
@@ -146,8 +153,12 @@ const {root,production}=require('./tests/helpers.cjs');
         'ストリートファイターZEROシリーズ','ザ・キング・オブ・ファイターズシリーズ',
         'ギルティギアシリーズ','餓狼伝説シリーズ','サムライスピリッツシリーズ'
       ]);
-      await page.setViewportSize({width:360,height:844});
+      await page.setViewportSize({width:320,height:844});
+      for(const button of await page.locator('#games button:not([data-game=""])').all()) await button.click();
+      assert.match(await page.locator('#games-toggle').innerText(),/12/);
+      assert.ok(await controlsFit(),'controls share a row at 320px with all categories selected');
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      await page.click('[data-game=""]');
       await page.setViewportSize({width:390,height:844});
       await page.click('[data-game=garousp]');await page.click('[data-game=shinsam]');await page.click('#games-toggle');
       assert.equal(await page.locator('.card').count(),5);
