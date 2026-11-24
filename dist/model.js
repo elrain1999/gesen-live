@@ -4,12 +4,18 @@
   else root.RetroRing = api;
 })(typeof globalThis === 'object' ? globalThis : this, function() {
   'use strict';
+  const vampireTitles = new RegExp([
+    /(?:ヴァ|バ)ンパイ[アヤ][\s・-]*(?:ハンター|セイ(?:ヴァ|バ)ー)|セイヴァー/,
+    // The original Japanese title needs a title boundary or gameplay context.
+    /(?:^|初代\s*|[\s【】\[\]「」『』(）)・/])(?:ヴァ|バ)ンパイ[アヤ](?=$|[\s]*[】\]」』)]|[\s・]*(?:初代|対戦|大会|配信|野試合|段位戦))/,
+    /\b(?:dark[\s-]*stalkers(?:[\s:-]*[1-3])?|night[\s-]+warriors|vampire[\s-]+(?:hunter|saviou?r)(?:\s*(?:2|ii))?|vsav2?)\b/
+  ].map(pattern=>pattern.source).join('|'), 'i');
   const games = [
     ['garousp','餓狼伝説SPECIAL', /餓狼伝説\s*(?:special|スペシャル|sp\b)|ガロスペ|fatal\s+fury\s+special/i, 'fatalfury'],
     ['shinsam','真サムライスピリッツ', /真サム|真[・\s]*侍魂|\bsamurai\s+shodown\s*(?:ii|2)\b/i, 'samuraispirits'],
     ['third','ストリートファイターIII 3rd STRIKE', /3rd\s*strike|スト(?:リートファイター)?(?:III|3)(?:\s*3rd|サード)|ストIII|サード|\b3rd\b/i],
     ['cvs2','CAPCOM VS. SNK 2', /capcom\s*vs\.?\s*snk\s*2|カプエス\s*2|\bcvs\s*2\b/i],
-    ['savior','ヴァンパイアセイヴァー', /ヴァンパイアセイヴァー|バンパイアセイバー|セイヴァー|vampire savior|darkstalkers\s*3/i],
+    ['savior','ヴァンパイアシリーズ', vampireTitles],
     ['sf2','ストリートファイターIIシリーズ', /ストリートファイター(?:ii(?!i)|2(?!\d))|(?<![ァ-ヺー])(?:スパ|スト)(?:2(?!\d)|ii(?!i))|street fighter\s*ii(?!i)|super turbo|\bssf2x\b/i],
     ['hokuto','北斗の拳', /北斗の拳|hokuto no ken|fist of the north star/i],
     ['sfzero','ストリートファイターZEROシリーズ', /(?:ストリートファイター|(?<![ァ-ヺー])スト)\s*(?:zero|ゼロ)|\bstreet\s+fighter\s+(?:zero[123]?|alpha[123]?)(?![a-z0-9])|\b(?:zero[123]|sf[az][123])(?![a-z0-9])/i],
