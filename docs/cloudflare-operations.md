@@ -26,10 +26,10 @@ GitHub API の200は実行 ID 付きの受付、204は本文なしの受付で�
 | HTTP 422 | 第25工程の変更が `main` に入っており、`update.yml` の `workflow_dispatch` に `cloudflare` 入力があることを確認します。 |
 | HTTP 429・5xx、または `github_dispatch_unconfirmed` | GitHub の実行一覧を先に確認します。通信が途切れた場合も要求が受理された可能性があります。Worker は同じ回の POST を再試行しません。 |
 | HTTP 3xx (`redirect_refused`) | Worker はリダイレクトを追いません。GitHub リポジトリ名とワークフローファイル名、API の呼び出し先を確認します。 |
-
-`github_dispatch_unconfirmed` は HTTP 応答を取得できなかった場合に記録します。`exception`（許可した例外名）、`category`（例: `timeout`、`network_error`、`fetch_error`）、`timeout`、`elapsed_ms` を確認します。`github_dispatch_rejected` には HTTP ステータスと経過時間が付きます。例外のメッセージ原文、ヘッダー、応答本文はログに出力しません。
 | 200・204の後に公開時刻が進まない | Actions の待機・取消、`collect` のモード、取得のエラー、`deploy` の結果を順に確認します。鮮度で `skip` した場合は時刻を更新しません。 |
 | `generated_at` だけ更新された | YouTube の取得失敗やクォータを Actions のログで確認します。取得成功の判定には `last_success_at` を使います。 |
+
+`github_dispatch_unconfirmed` は HTTP 応答を取得できなかった場合に記録します。`exception`（許可した例外名）、`category`（`timeout`、`network_error`、`fetch_error` など）、`timeout`、`elapsed_ms` を確認します。`github_dispatch_rejected` には HTTP ステータスと経過時間が付きます。例外のメッセージ原文、ヘッダー、応答本文はログに出力しません。
 
 ## トークンの更新・失効
 
