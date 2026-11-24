@@ -8,7 +8,11 @@
 </head><body>
 <header>
 <img id="top-banner" width="1774" height="887" alt="" hidden data-sources="banners/ryu-terry.webp banners/geese-bison.webp banners/chun-li-mai.webp">
-<h1>ゲーセン対戦台<span>LIVE</span></h1><a id="about-link" href="about.html">このサイトについて</a>
+<h1>ゲーセン対戦台<span>LIVE</span></h1>
+<div class="header-meta" id="header-meta">
+<p class="stamp" id="updated" hidden><span><span id="updated-time"></span><span class="stamp-zone">（日本時間）</span><abbr class="stamp-zone-short" title="日本時間">JST</abbr></span><span id="updated-success" hidden></span></p>
+<a id="about-link" href="about.html">このサイトについて</a>
+</div>
 </header>
 <main>
 <section class="filters" aria-label="配信の絞り込み">
@@ -18,9 +22,16 @@
 <div class="controls"><button id="games-toggle" aria-expanded="false" aria-controls="games">ゲーム選択</button>
 <label>並び順 <select id="sort"><option value="viewers">同時視聴者数順</option><option value="time">配信開始順（新しい順）</option></select></label></div>
 <div id="games" role="group" aria-label="ゲームタイトル" hidden></div>
+</section>
+<p id="fetch-status" role="status"></p>
+<div id="results">
+<div id="current-results"></div>
+<section id="archive" hidden>
+<h2>アーカイブ<small id="archive-count"></small></h2>
 <label class="archive-search" for="archive-search">アーカイブのタイトル検索
 <input id="archive-search" type="search" placeholder="例：ガロスペ 対戦会"></label>
+<div class="grid" id="archive-cards"></div>
 </section>
-<p class="stamp" id="updated"></p><p id="fetch-status" role="status"></p>
-<div id="results"></div><noscript>配信一覧を表示するにはJavaScriptを有効にしてください。</noscript>
+<p id="empty-results" hidden></p>
+</div><noscript>配信一覧を表示するにはJavaScriptを有効にしてください。</noscript>
 </main></body></html>

@@ -58,13 +58,23 @@ const {root,production}=require('./tests/helpers.cjs');
       assert.equal(await page.locator('.card').count(),baseline.length);
       const banner=page.locator('#top-banner');
       const fallbackTitle=page.locator('header h1');
-      const checkRatio=()=>banner.evaluate(image=>Math.abs(image.clientHeight-image.clientWidth*image.naturalHeight/image.naturalWidth)<2);
+      const checkBannerHeight=width=>banner.evaluate((image,mobile)=>{
+        const expectedHeight=image.clientWidth*image.naturalHeight/image.naturalWidth*(mobile ? .88 : 1);
+        return Math.abs(image.clientHeight-expectedHeight)<2 &&
+          (!mobile || getComputedStyle(image).objectPosition==='50% 0%');
+      },width<=540);
       await banner.waitFor({state:'visible'});
       assert.match(await banner.getAttribute('src'),/ryu-terry\.webp$/);
-      for(const width of [360,375,390,768,1440]){
+      for(const width of [320,360,375,390,768,1440]){
         await page.setViewportSize({width,height:844});
         assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-        assert.ok(await checkRatio());
+        assert.ok(await checkBannerHeight(width),width);
+        assert.ok(await page.evaluate(()=>{
+          const stamp=document.querySelector('header #updated').getBoundingClientRect();
+          const about=document.querySelector('#about-link').getBoundingClientRect();
+          return !document.querySelector('main #updated') && stamp.right<=about.left &&
+            Math.abs(stamp.top+stamp.height/2-about.top-about.height/2)<1;
+        }));
       }
       await page.setViewportSize({width:390,height:844});
       if(prefix==='/'){
@@ -73,7 +83,7 @@ const {root,production}=require('./tests/helpers.cjs');
           await page.reload({waitUntil:'domcontentloaded'});
           await banner.waitFor({state:'visible'});
           assert.equal(await banner.getAttribute('src'),'banners/'+filename);
-          assert.ok(await checkRatio());
+          assert.ok(await checkBannerHeight(390));
           await page.fill('#archive-search','対戦');
           assert.equal(await banner.getAttribute('src'),'banners/'+filename);
           await page.fill('#archive-search','');
@@ -106,7 +116,11 @@ const {root,production}=require('./tests/helpers.cjs');
       assert.equal(await page.locator('.card').count(),11);
       assert.match(await page.locator('#live').innerText(),new RegExp(active[0].display_name));
       await page.waitForFunction(()=>document.querySelector('#live .thumb img')?.naturalWidth > 0);
+      assert.match(await page.locator('#updated').innerText(),/最終更新 \d{2}\/\d{2} \d{2}:\d{2}.*JST/);
+      assert.ok((await page.locator('#updated').boundingBox()).height<20);
+      await page.setViewportSize({width:1440,height:844});
       assert.match(await page.locator('#updated').innerText(),/最終更新.+日本時間/);
+      await page.setViewportSize({width:390,height:844});
       assert.match(await page.locator('#live').innerText(),/0人/);
       assert.match(await page.locator('#live').innerText(),/不明/);
       assert.equal(await page.locator('#live h3 img').count(),0);
@@ -128,7 +142,7 @@ const {root,production}=require('./tests/helpers.cjs');
       await page.click('#games-toggle');
       assert.deepEqual(await page.locator('#games button').allTextContents(),[
         'すべて','餓狼伝説SPECIAL','真サムライスピリッツ','ストリートファイターIII 3rd STRIKE',
-        'CAPCOM VS. SNK 2','ヴァンパイアセイヴァー','ストリートファイターIIシリーズ','北斗の拳',
+        'CAPCOM VS. SNK 2','ヴァンパイアシリーズ','ストリートファイターIIシリーズ','北斗の拳',
         'ストリートファイターZEROシリーズ','ザ・キング・オブ・ファイターズシリーズ',
         'ギルティギアシリーズ','餓狼伝説シリーズ','サムライスピリッツシリーズ'
       ]);
@@ -170,8 +184,11 @@ const {root,production}=require('./tests/helpers.cjs');
       assert.equal(await page.locator('.card').count(),11);
       assert.ok(await page.getByText('ガロスペ・KOF98 店舗対戦',{exact:true}).isVisible());
       const archiveSearch=page.getByRole('searchbox',{name:'アーカイブのタイトル検索'});
+      assert.equal(await page.locator('#archive > h2 + label').getByRole('searchbox').count(),1);
+      assert.equal(await page.locator('#live input, #upcoming input, .filters input').count(),0);
       await page.click('[data-game=kof]');
       await archiveSearch.fill('  ｋｏｆ９８　店舗  ');
+      assert.ok(await archiveSearch.evaluate(node=>document.activeElement===node));
       assert.equal(await page.locator('#archive h2 small').textContent(),'1件');
       assert.ok(await page.locator('#archive').getByText('ガロスペ・KOF98 店舗対戦').isVisible());
       assert.equal(await page.locator('#live h2 small').textContent(),'1件');
@@ -183,6 +200,7 @@ const {root,production}=require('./tests/helpers.cjs');
       await page.click('[data-state=archive]');
       assert.equal(await archiveSearch.isVisible(),false);
       await page.click('[data-state=archive]');
+      assert.equal(await archiveSearch.inputValue(),'  ｋｏｆ９８　店舗  ');
       await archiveSearch.fill('');
       assert.equal(await page.locator('#archive h2 small').textContent(),'7件');
       await page.click('#games-toggle');
@@ -194,8 +212,24 @@ const {root,production}=require('./tests/helpers.cjs');
         assert.equal(await page.locator('.card').count(),count);
       };
       const staleTime=iso(-67*60000);
+      const vampireFixtures=['【ヴァンパイア】 初代対戦','Night Warriors / 3rd STRIKE'].map((title,i)=>{
+        const id='aaa0000001'+(2+i);
+        return {...fixture.streams[9],id,title,url:'https://www.youtube.com/watch?v='+id};
+      });
+      responseSnapshot={...fixture,streams:[...fixture.streams,...vampireFixtures]};
+      await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+      await page.locator('#archive').getByText(vampireFixtures[0].title).waitFor();
+      await page.click('#games-toggle');
+      await page.click('[data-game=savior]');
+      assert.equal(await page.locator('#archive h2 small').textContent(),'3件');
+      await archiveSearch.fill('night warriors');
+      assert.equal(await page.locator('#archive h2 small').textContent(),'1件');
+      await archiveSearch.fill('');
+      await page.click('[data-game=""]');
+      await page.click('#games-toggle');
       const otherGame={...fixture.streams[4],title:'SOUND VOLTEX 店舗配信'};
-      await loadSnapshot({...fixture,streams:fixture.streams.map(row=>row.id===otherGame.id?otherGame:row)},'',11);
+      responseSnapshot={...fixture,streams:fixture.streams.map(row=>row.id===otherGame.id?otherGame:row)};
+      await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
       await page.locator('#archive').getByText(otherGame.title).waitFor();
       await archiveSearch.fill('sound voltex');
       assert.equal(await page.locator('#archive h2 small').textContent(),'1件');

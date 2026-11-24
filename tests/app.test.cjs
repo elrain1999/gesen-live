@@ -38,7 +38,19 @@ test('Real Bout Special aliases never count as Garou Special',()=>{
 });
 test('conservative game classification accepts unknown and does not mix similar games',()=>{
   for(const [title,id] of [['ガロスペ','garousp'],['餓狼伝説SPECIAL','garousp'],['真サム対戦','shinsam'],['3rd STRIKE','third'],['カプエス2','cvs2'],['ヴァンパイアセイヴァー','savior'],['スパⅡX','sf2'],['北斗の拳','hokuto']])assert.ok(M.classify(title).includes(id),title);
-  for(const title of ['ヴァンパイアハンター','SF6','X ST GG 98','GG BOYZ','ラスト2試合','ロックマンゼロ3','KOFAX'])assert.deepEqual(M.classify(title),[],title);
+  for(const title of ['SF6','X ST GG 98','GG BOYZ','ラスト2試合','ロックマンゼロ3','KOFAX'])assert.deepEqual(M.classify(title),[],title);
+});
+test('Vampire series titles share the existing savior category',()=>{
+  for (const title of [
+    'ヴァンパイア', '初代ヴァンパイア', '【ヴァンパイア】フリープレイ', 'ミカド】ヴァンパイア対戦会',
+    'ヴァンパイア ハンターⅡ', 'ヴァンパイアハンター', 'ヴァンパイアセイヴァー',
+    'ヴァンパイアセイヴァー２', 'バンパイアセイバー', 'セイヴァー対戦会', 'Darkstalkers',
+    'DARKSTALKERS3', 'Night Warriors', 'Vampire Hunter 2', 'Vampire Savior II', 'ＶＳＡＶ', 'VSAV2'
+  ]) assert.deepEqual(M.classify(title), ['savior'], title);
+  for (const title of ['Vampire', 'Vampire Survivors', 'ヴァンパイア サバイバーズ', 'ヴァンパイアの解説', 'VSAV200', 'XVSAV'])
+    assert.deepEqual(M.classify(title), [], title);
+  assert.deepEqual(M.classify('VSAV2 / 3rd STRIKE'), ['third','savior']);
+  assert.ok(M.matches({...channel,games:[{title:'Darkstalkers'}]},'savior','',''));
 });
 test('independent titles and series can coexist as unique tags',()=>{
   for(const [title,tags] of [

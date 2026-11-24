@@ -71,11 +71,19 @@
       '<p class="meta">'+escape(item.channel.display_name)+' · YouTube</p><p class="meta">'+(item.status==='upcoming'?'配信予定：':'配信開始：')+formatTime(item.starts_at)+'</p>'+
       (live?'<p class="meta">同時視聴者数：'+viewers+'</p>':'')+'</div></a>';
   }
+  const previousResults = new Map();
+  function updateResults(container, html) {
+    if (previousResults.get(container) === html) return;
+    const focused = container.contains(document.activeElement) && document.activeElement.dataset.video;
+    container.innerHTML = html;
+    if (focused) Array.from(container.querySelectorAll('.card')).find(a=>a.dataset.video===focused)?.focus({preventScroll:true});
+    previousResults.set(container, html);
+  }
   function render() {
     for (const b of byId('states').children) b.setAttribute('aria-pressed',String(states.has(b.dataset.state)));
     for (const b of gamePanel.children) b.setAttribute('aria-pressed',String(b.dataset.game ? games.has(b.dataset.game) : !games.size));
     byId('games-toggle').textContent=games.size?'ゲーム選択（'+games.size+'）':'ゲーム選択';
-    archiveSearch.parentElement.hidden = !states.has('archive');
+    byId('archive').hidden = !states.has('archive');
     const keywords = searchText(archiveSearch.value).trim().split(/\s+/).filter(Boolean);
     const now = Date.now();
     const provider = snapshot.providers?.YouTube?.status;
@@ -101,12 +109,15 @@
       }
     }
     byId('fetch-status').textContent = notice;
-    byId('updated').textContent = (snapshotPreview?'固定プレビュー · ':'')+
-      (provider === 'ok' ? '最終更新 ' : '最終取得試行 ')+formatTime(snapshot.generated_at)+'（日本時間）'+
-      (provider!=='ok'&&snapshot.last_success_at?' · 最終取得成功 '+formatTime(snapshot.last_success_at):'');
+    byId('updated-time').textContent = (snapshotPreview?'固定プレビュー · ':'')+
+      (provider === 'ok' ? '最終更新 ' : '最終取得試行 ')+formatTime(snapshot.generated_at);
+    byId('updated').hidden = false;
+    const previousSuccess = byId('updated-success');
+    previousSuccess.hidden = provider === 'ok' || !snapshot.last_success_at;
+    previousSuccess.textContent = previousSuccess.hidden ? '' : '最終取得成功 '+formatTime(snapshot.last_success_at);
     const sort=byId('sort').value;
-    const html=Object.entries(labels).filter(([state])=>states.has(state)).map(([state,label])=>{
-      const items=rows.filter(row=>{
+    function itemsFor(state) {
+      return rows.filter(row=>{
         if (row.status !== state) return false;
         if (state !== 'archive' || !keywords.length) return true;
         const title = searchText(row.title);
@@ -119,22 +130,22 @@
         const difference=Date.parse(b.starts_at)-Date.parse(a.starts_at);
         return (state==='upcoming' && sort==='viewers' ? -difference : difference) || a.id.localeCompare(b.id);
       });
-      if(!items.length){
-        return state==='archive' && keywords.length && snapshot.schema_version
-          ? '<section id="archive"><h2>アーカイブ<small>0件</small></h2><p>条件に該当するアーカイブがありません。</p></section>'
-          : '';
-      }
-      return '<section id="'+state+'"><h2>'+label+'<small>'+items.length+'件</small></h2><div class="grid">'+items.map(card).join('')+'</div></section>';
-    }).join('') || (notice && states.size ? '<p>現在の配信件数は未確認です。</p>' : '<p>条件に該当する配信情報がありません。</p>');
-    const results=byId('results');
-    if(html!==lastHtml){
-      const focused=document.activeElement?.dataset.video;
-      results.innerHTML=html;
-      if(focused) Array.from(results.querySelectorAll('.card')).find(a=>a.dataset.video===focused)?.focus({preventScroll:true});
-      lastHtml=html;
     }
+    const currentHtml = ['live', 'upcoming'].map(state => {
+      const items = itemsFor(state);
+      return items.length ? '<section id="'+state+'"><h2>'+labels[state]+'<small>'+items.length+'件</small></h2><div class="grid">'+items.map(card).join('')+'</div></section>' : '';
+    }).join('');
+    const archives = itemsFor('archive');
+    const noArchiveMatches = states.has('archive') && snapshot.schema_version && keywords.length && !archives.length;
+    byId('archive-count').textContent = archives.length+'件';
+    updateResults(byId('current-results'), currentHtml);
+    updateResults(byId('archive-cards'), noArchiveMatches
+      ? '<p>条件に該当するアーカイブがありません。</p>' : archives.map(card).join(''));
+    const empty = byId('empty-results');
+    empty.hidden = Boolean(currentHtml || archives.length || noArchiveMatches);
+    empty.textContent = empty.hidden ? '' : notice && states.size
+      ? '現在の配信件数は未確認です。' : '条件に該当する配信情報がありません。';
   }
-  let lastHtml='';
   render();
   if(snapshotPreview){
     const about=byId('offline-about');
@@ -142,7 +153,7 @@
       function navigate(){
         const show=location.hash==='#about';
         document.querySelector('main').hidden=show;about.hidden=!show;
-        byId('about-link').hidden=show;
+        byId('header-meta').hidden=show;
         document.title=(show?'このサイトについて | ':'')+'ゲーセン対戦台LIVE';
         if(show)about.focus();
       }
