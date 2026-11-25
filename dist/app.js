@@ -110,7 +110,7 @@
     }
     byId('fetch-status').textContent = notice;
     byId('updated-time').textContent = (snapshotPreview?'固定プレビュー · ':'')+
-      (provider === 'ok' ? '最終更新 ' : '最終取得試行 ')+formatTime(snapshot.generated_at);
+      '最終取得試行 '+formatTime(snapshot.generated_at);
     byId('updated').hidden = false;
     const previousSuccess = byId('updated-success');
     previousSuccess.hidden = provider === 'ok' || !snapshot.last_success_at;
@@ -171,7 +171,10 @@
       const response=await fetch('streams.json',{signal:controller.signal,cache:'no-store'});
       if(!response.ok)throw Error();
       const data=await response.json();
-      if(data?.schema_version!==1 || !Array.isArray(data.streams) || !Array.isArray(data.checks) || data.checks.some(c=>!c||typeof c!=='object'))throw Error();
+      if(!Number.isFinite(Date.parse(data?.generated_at)) || data?.schema_version!==1 || !Array.isArray(data.streams) || !Array.isArray(data.checks) || data.checks.some(c=>!c||typeof c!=='object'))throw Error();
+      if(Number.isFinite(Date.parse(snapshot.generated_at))&&
+        (Date.parse(data.generated_at)<Date.parse(snapshot.generated_at)||
+         (snapshot.last_success_at&&!(Date.parse(data.last_success_at)>=Date.parse(snapshot.last_success_at)))))throw Error();
       snapshot=data;error='';
     } catch {error='配信情報を読み込めませんでした。';}
     finally {clearTimeout(timer);pending=false;render();}

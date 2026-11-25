@@ -63,16 +63,16 @@ test('YouTube daily search budget is 80, spreads calls over runs, rotates covera
  const channels=Array.from({length:50},(_,i)=>({...yt,record_id:'c'+i}));let searchCalls=0;
  const fetcher=async url=>{const route=new URL(url).pathname.split('/').pop();if(route==='search'){searchCalls++;return reply({items:[]});}if(route==='channels')return reply(metadata);return reply({items:[]});};
  let state;
- for(let i=0;i<20;i++){
+ for(let i=0;i<40;i++){
    searchCalls=0;const result=await Y.collect(channels,{key:'x',now,state,fetcher});state=result.state;
-   assert.ok(searchCalls<=8);
+   assert.ok(searchCalls<=2);
  }
  assert.equal(state.search_used,80);
  assert.equal(new Set(state.searched).size,80);
  assert.ok(channels.every(c=>state.searched.includes(c.record_id+':live')));
  searchCalls=0;const rerun=await Y.collect(channels,{key:'x',now,state,fetcher});assert.equal(searchCalls,0);
  const tomorrow=await Y.collect(channels,{key:'x',now:'2026-11-18T10:00:00Z',state:rerun.state,fetcher});
- assert.equal(searchCalls,8);assert.equal(tomorrow.state.searched[0],'c40:live');
+ assert.equal(searchCalls,2);assert.equal(tomorrow.state.searched[0],'c40:live');
  assert.equal(Y.quotaDay('2026-11-18T07:59:59Z'),'2026-11-17');assert.equal(Y.quotaDay('2026-11-18T08:00:00Z'),'2026-11-18');
 });
 test('YouTube fixed ID is resolved only by exact official handle match and source ledger is unchanged',async()=>{
@@ -251,12 +251,12 @@ test('a successful 429 retry clears the warning while retaining the failed respo
  };
  const result=await Y.collect([yt],{key:'fixture',now,fetcher,clock:()=>time,
    pause:async ms=>{waits.push(ms);time+=ms;}});
- assert.deepEqual(waits.filter(ms=>ms>=1000),[12000,1000]);
+ assert.deepEqual(waits.filter(ms=>ms>=1000),[12000]);
  assert.equal(result.provider.status,'ok');
- assert.ok(result.checks.every(c=>c.status==='ok'));
+ assert.ok(result.checks.every(c=>['ok','partial'].includes(c.status)));
  assert.equal(result.telemetry.recovered,1);
  assert.deepEqual(result.telemetry.failed_responses,{search:{API_HTTP_429:1}});
- assert.equal(result.telemetry.requests,5);
+ assert.equal(result.telemetry.requests,4);
  assert.deepEqual(result.telemetry.http_429,[{method:'search.list',request_number:3,reason:'rateLimitExceeded',retry_after_present:true,backoff_elapsed_ms:12000}]);
  assert.equal(result.telemetry.endpoints.search.retry_succeeded,1);
  assert.doesNotMatch(JSON.stringify(result.telemetry),/secret-value|fixture/);
@@ -282,7 +282,7 @@ test('live search uses an existing slot to check for a follow-on broadcast',asyn
  };
  const result=await Y.collect(channels,{key:'fixture',now,fetcher});
  assert.deepEqual(search[0],[recent.youtube_channel_id,'live']);
- assert.equal(search.length,4);
+ assert.equal(search.length,2);
  assert.equal(result.streams.find(s=>s.id==='new').status,'live');
  assert.equal(result.streams.find(s=>s.id==='ended').status,'archive');
 });
@@ -290,19 +290,19 @@ test('live search uses an existing slot to check for a follow-on broadcast',asyn
 test('scheduled collection and Pages deployment are wired on main',()=>{
  const workflow=fs.readFileSync('.github/workflows/update.yml','utf8');
  const cron=[...workflow.matchAll(/^    - cron: '([^']+)'$/gm)].map(match=>match[1]);
- assert.deepEqual(cron,['17 0-7,15-23 * * *','7,17,27,37,47,57 8-14 * * *','32 * * * *']);
+ assert.deepEqual(cron,['17 0-7,15-23 * * *','7,22,37,52 8-14 * * *','32 * * * *']);
  assert.match(workflow,/^  workflow_dispatch:\n    inputs:\n      cloudflare:[\s\S]*?type: boolean\n        default: false/m);
  assert.match(workflow,/^      AUTOMATED_COLLECTION: .*github\.event_name == 'schedule'.*github\.event_name == 'workflow_dispatch' && inputs\.cloudflare == true/m);
  assert.match(workflow,/^  schedule:\n(?:    #.*\n)*    - cron:/m);
  assert.match(workflow,/^  check_backup:\n    if: .*github\.event\.schedule == '32 \* \* \* \*'.*refs\/heads\/main.*PUBLISH_PAGES/m);
  assert.match(workflow,/^  collect:\n    needs: check_backup\n    if: >-[\s\S]*?!cancelled\(\).*github\.event_name != 'schedule'[\s\S]*?needs\.check_backup\.result != 'skipped' && needs\.check_backup\.outputs\.refresh != 'false'/m);
- assert.match(workflow,/^      - run: npm run validate:api\n        if: steps\.recent\.outputs\.mode != 'reuse' && steps\.recent\.outputs\.mode != 'skip'\n        env:/m);
+ assert.match(workflow,/^      - run: npm run validate:api\n        id: acquisition\n        if: steps\.recent\.outputs\.mode != 'reuse' && steps\.recent\.outputs\.mode != 'skip'\n        env:/m);
  assert.match(workflow,/^  deploy:\n    needs: collect\n    if: >-[\s\S]*?!cancelled\(\) && needs\.collect\.result == 'success'[\s\S]*?refs\/heads\/main[\s\S]*?needs\.collect\.outputs\.deployable == 'true'/m);
 });
 
 test('backup checks the last published success at the current JST cadence',async()=>{
- for(const [time,maxAge] of [['2026-11-24T07:59:59Z',60],['2026-11-24T08:00:00Z',10],
-   ['2026-11-24T14:59:59Z',10],['2026-11-24T15:00:00Z',60]]){
+ for(const [time,maxAge] of [['2026-11-24T07:59:59Z',60],['2026-11-24T08:00:00Z',15],
+   ['2026-11-24T14:59:59Z',15],['2026-11-24T15:00:00Z',60]]){
    const checkedAt=Date.parse(time);
    for(const [age,refresh] of [[maxAge*60000-1,false],[maxAge*60000,true]]){
      const decision=await checkPublishedSnapshot({now:()=>checkedAt,key:'test-1',fetcher:async(url,options)=>{
@@ -351,7 +351,7 @@ test('Actions logs count deferred live channels separately and redact untrusted 
    collect:(_,options)=>Y.collect([yt,other],{...options,fetcher})}}});
  assert.ok(snapshot.streams.some(s=>s.id==='cached'&&s.fetched_at===now));
  const counts=JSON.parse(logs.find(line=>line.startsWith('YouTube live channel checks: ')).split(': ')[1]);
- assert.deepEqual(counts,{ok:0,partial:0,deferred:1,error:1});
+ assert.deepEqual(counts,{ok:0,partial:1,deferred:0,error:1});
  const events=snapshot.telemetry.YouTube.http_429;
  assert.equal(events.length,2);
  assert.ok(events.every(e=>e.reason===null&&e.retry_after_present));

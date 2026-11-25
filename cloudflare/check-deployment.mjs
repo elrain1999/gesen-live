@@ -2,7 +2,7 @@ import {pathToFileURL} from 'node:url';
 
 const worker = 'gesen-live-scheduler';
 const secretName = 'GITHUB_DISPATCH_TOKEN';
-const expectedCrons = ['47 0-7,15-23 * * *', '4,14,24,34,44,54 8-14 * * *'];
+const expectedCrons = ['47 0-7,15-23 * * *', '4,19,34,49 8-14 * * *'];
 
 export async function checkDeployment(phase, {accountId, token, fetcher = fetch}) {
   if (!['preflight', 'verify'].includes(phase)) throw new Error('Unknown deployment check');

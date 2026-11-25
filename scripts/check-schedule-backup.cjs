@@ -17,7 +17,7 @@ async function checkPublishedSnapshot({fetcher=fetch,now=Date.now,key=''}={}){
       lastSuccess>generated||generated>checkedAt)return {refresh:true,reason:'invalid_snapshot'};
 
     const jstHour=new Date(checkedAt+9*3600000).getUTCHours();
-    const maxAge=(jstHour>=17?10:60)*60000;
+    const maxAge=(jstHour>=17?15:60)*60000;
     return checkedAt-lastSuccess>=maxAge
       ? {refresh:true,reason:'last_success_stale'}
       : {refresh:false,reason:'last_success_fresh'};
