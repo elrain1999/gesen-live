@@ -6,9 +6,9 @@ import {collectionMode} from '../scripts/collection-mode.mjs';
 import {checkDeployment} from '../cloudflare/check-deployment.mjs';
 
 const minute=60000;
-const now=Date.parse('2026-11-24T08:14:00Z');
+const now=Date.parse('2026-11-24T08:19:00Z');
 const early=Date.parse('2026-11-24T00:47:00Z');
-const eveningCron='4,14,24,34,44,54 8-14 * * *';
+const eveningCron='4,19,34,49 8-14 * * *';
 const hourlyCron='47 0-7,15-23 * * *';
 const event={cron:eveningCron,scheduledTime:now};
 const dispatchUrl='https://api.github.com/repos/elrain1999/gesen-live/actions/workflows/update.yml/dispatches';
@@ -35,7 +35,7 @@ function mockNetwork(published,responseStatus=204){
   return {calls,logs,fetcher,logger,now:()=>now};
 }
 
-test('Wrangler and the Worker accept exactly 59 UTC slots across the JST date boundary',()=>{
+test('Wrangler and the Worker accept exactly 45 UTC slots across the JST date boundary',()=>{
   assert.equal(typeof worker.scheduled,'function');
   assert.equal(worker.fetch,undefined);
   const config=readFileSync('cloudflare/wrangler.toml','utf8');
@@ -46,17 +46,17 @@ test('Wrangler and the Worker accept exactly 59 UTC slots across the JST date bo
     const scheduledTime=start+offset*minute;
     const hour=Math.floor(offset/60),min=offset%60;
     const matches=[hourlyCron,eveningCron].filter(cron=>isScheduledSlot({cron,scheduledTime}));
-    const expected=hour<17?min===47:min%10===4;
+    const expected=hour<17?min===47:min%15===4;
     assert.equal(matches.length,Number(expected));
     count+=matches.length;
   }
-  assert.equal(count,59);
+  assert.equal(count,45);
   assert.equal(isScheduledSlot({cron:'* * * * *',scheduledTime:now}),false);
 });
 
 test('freshness permits the next target interval across JST day and evening boundaries',()=>{
-  for(const [checkedAt,maxAge] of [['2026-11-24T07:59:59Z',50],['2026-11-24T08:00:00Z',8],
-    ['2026-11-24T14:59:59Z',8],['2026-11-24T15:00:00Z',50]]){
+  for(const [checkedAt,maxAge] of [['2026-11-24T07:59:59Z',50],['2026-11-24T08:00:00Z',12],
+    ['2026-11-24T14:59:59Z',12],['2026-11-24T15:00:00Z',50]]){
     const time=Date.parse(checkedAt);
     assert.equal(isRecent(time-(maxAge*minute-1),time),true,checkedAt);
     assert.equal(isRecent(time-maxAge*minute,time),false,checkedAt);
@@ -186,7 +186,7 @@ test('recent failure does not repeat YouTube requests or deploy a failed cache',
   assert.equal(await collectionMode(snapshot(now-minute,now-20*minute,'error'),{...mock,publish:true}),'skip');
   assert.equal(await collectionMode(snapshot(now-minute),{...mock,publish:false}),'skip');
   assert.equal(mock.calls.length,0);
-  assert.equal(await collectionMode(snapshot(now-8*minute),{...mock,publish:true}),'fetch');
+  assert.equal(await collectionMode(snapshot(now-12*minute),{...mock,publish:true}),'fetch');
   assert.equal(await collectionMode(snapshot(now+minute),{...mock,publish:true}),'fetch');
   assert.equal(await collectionMode({}, {...mock,publish:true}),'fetch');
 });

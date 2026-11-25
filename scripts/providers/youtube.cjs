@@ -5,11 +5,12 @@ const dailySearchLimit=80;
 const pendingEndMaxAge=2*3600000;
 const kinds=['live','upcoming','archive'];
 const quotaDay=now=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(now));
+const searchRunLimit=now=>new Date(Date.parse(now)+9*3600000).getUTCHours()>=17?2:1;
 const handle=value=>String(value||'').normalize('NFC').toLowerCase();
 const channelId=value=>/^UC[\w-]{22}$/.test(value);
 const batches=(ids)=>Array.from({length:Math.ceil(ids.length/50)},(_,i)=>ids.slice(i*50,i*50+50));
 
-function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
+function collectorAPI({key,next,telemetry,fetcher,pause,clock,runBudget}) {
   const blocked=new Map();
   const retried=new Set();
   const deferred=error=>Object.assign(new APIError(error.message),error,{deferred:true});
@@ -29,11 +30,11 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
       error.category=stored.category;error.endpoint=resource;
       throw deferred(error);
     }
-    if(record&&(next.search_used>=dailySearchLimit||telemetry.search_requests>=runLimit))return null;
+    if(resource==='search'&&(next.search_used>=dailySearchLimit||telemetry.search_requests>=Math.min(runLimit,runBudget)))return null;
     const isSearch=resource==='search';
     const retries=retried.has(resource)?0:isSearch?1:2;
     for(let retry=0;;retry++){
-      if(record&&(next.search_used>=dailySearchLimit||telemetry.search_requests>=runLimit))return null;
+      if(resource==='search'&&(next.search_used>=dailySearchLimit||telemetry.search_requests>=Math.min(runLimit,runBudget)))return null;
       if(resource==='search'){
         next.search_used++;telemetry.search_requests++;
       }else{
@@ -45,6 +46,8 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
       }
       if(telemetry.requests)await pause(Math.max(120,isSearch?nextSearchAt-clock():0));
       if(isSearch)nextSearchAt=clock()+1000;
+      // A retry/startup delay must not spend a reservation from the previous PT day.
+      if(isSearch&&quotaDay(clock())!==next.day)return null;
       stats.requests++;
       if(retry)stats.retries++;
       try{
@@ -76,7 +79,7 @@ function collectorAPI({key,next,telemetry,fetcher,pause,clock}) {
         // Search gets one delayed retry per run. Longer server waits carry over to the next run.
         const wait=Math.max(required,isSearch?10000:1000*2**retry);
         const maxWait=isSearch?15000:3000;
-        if(retry<retries&&wait<=maxWait&&(!record||(next.search_used<dailySearchLimit&&telemetry.search_requests<runLimit))){
+        if(retry<retries&&wait<=maxWait&&(!record||(next.search_used<dailySearchLimit&&telemetry.search_requests<Math.min(runLimit,runBudget)))){
           const before=clock();
           await pause(wait);
           if(rateEvent)rateEvent.backoff_elapsed_ms=Math.max(0,clock()-before);
@@ -139,6 +142,8 @@ function groupCandidates(rows,kind){
 }
 
 async function collect(channels,{key,previous=[],state={},now=new Date().toISOString(),fetcher=fetch,
+  searchAllowance=fetcher===fetch?Number(process.env.YOUTUBE_SEARCH_ALLOWANCE||0):undefined,
+  reservationDay=fetcher===fetch?process.env.YOUTUBE_SEARCH_DAY:quotaDay(now),
   pause=fetcher===fetch?delay:async()=>{},clock=fetcher===fetch?Date.now:()=>Date.parse(now)}={}) {
   const streams=[],checks=[],verified_ids=[],resolutions=[];
   const telemetry={requests:0,search_requests:0,recovered:0,failed_responses:{},endpoints:{},http_429:[]};
@@ -148,7 +153,8 @@ async function collect(channels,{key,previous=[],state={},now=new Date().toISOSt
     searched:sameDay?[...(state.searched||[])]:[],search_cursor:sameDay?{...state.search_cursor}:{},identifiers:{...state.identifiers},known:{...state.known},
     uploads:{...state.uploads},cooldowns:{...state.cooldowns},last_success:{...state.last_success}};
   if(!key)return {streams,checks:channels.flatMap(c=>kinds.map(kind=>({channel_id:c.record_id,kind,status:'not_configured',category:'auth',checked_at:now}))),verified_ids,resolutions,telemetry,state:next,provider:{status:'not_configured',message:'APIキー未設定のため配信情報は未取得'}};
-  const api=collectorAPI({key,next,telemetry,fetcher,pause,clock});
+  const runBudget=reservationDay!==day?0:Math.min(searchRunLimit(now),searchAllowance===undefined?searchRunLimit(now):Number.isInteger(searchAllowance)&&searchAllowance>=0?searchAllowance:0);
+  const api=collectorAPI({key,next,telemetry,fetcher,pause,clock,runBudget});
   const pendingEnd=state.pending_end||{};
   const nowMs=Date.parse(now);
   next.pending_end={};
@@ -219,11 +225,13 @@ async function collect(channels,{key,previous=[],state={},now=new Date().toISOSt
   };
 
   // A dedicated live scan takes precedence over every upcoming search.
-  for(const [kind,limit] of [['live',6],['upcoming',2]]){
+  for(const [kind,limit] of [['live',runBudget],['upcoming',runBudget-telemetry.search_requests]]){
     const start=telemetry.search_requests;
     const index=eligible.findIndex(r=>r.channel.record_id===next.search_cursor[kind]);
     const rotation=index<0?0:index+1;
-    const queue=[...eligible.slice(rotation),...eligible.slice(0,rotation)];
+    const rotated=[...eligible.slice(rotation),...eligible.slice(0,rotation)];
+    const knownLive=row=>[...row.candidates].some(id=>broadcast(details.get(id)||{},row,now)?.status==='live');
+    const queue=kind==='live'?[...rotated.filter(r=>!knownLive(r)),...rotated.filter(knownLive)]:rotated;
     let priority;
     if(kind==='live'){
       const ranked=queue.filter(row=>!next.searched.includes(row.channel.record_id+':live'))
@@ -296,4 +304,4 @@ async function collect(channels,{key,previous=[],state={},now=new Date().toISOSt
   const status=errors?(anyCoverage?'partial':'error'):'ok';
   return {streams,checks,verified_ids,resolutions,telemetry,state:next,provider:{status}};
 }
-module.exports={collect,quotaDay};
+module.exports={collect,quotaDay,searchRunLimit};

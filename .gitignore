@@ -12,3 +12,5 @@ data/api-validation.json
 .wrangler/
 *.map
 *.bundle
+
+data/search-reservation.json

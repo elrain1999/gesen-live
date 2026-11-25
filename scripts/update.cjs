@@ -22,6 +22,7 @@ async function main({dataDir=process.env.RETRO_RING_DATA_DIR||'data',now=new Dat
   // Always use the authoritative approved population, even for an isolated probe.
   const registered=M.channels(JSON.parse(fs.readFileSync('data/channels.public.json')));
   let previous={streams:[]};try{previous=JSON.parse(fs.readFileSync(path.join(dataDir,'streams.json')));if(!Array.isArray(previous.streams))throw Error();}catch{console.error('SNAPSHOT_MISSING_OR_INVALID: starting without cache');previous={streams:[]};}
+  if(Date.parse(previous.generated_at)>Date.parse(now)||Date.parse(previous.last_success_at)>Date.parse(now))throw Error('SNAPSHOT_ROLLBACK_REFUSED');
   previous.streams=M.streams(previous,registered,Date.parse(now),{keepUnconfirmedLive:true}).map(({game,stale,channel,...s})=>s);
   let state={};try{const cached=JSON.parse(fs.readFileSync(path.join(dataDir,'fetch-state.json')));if(cached&&typeof cached==='object'&&!Array.isArray(cached))state=cached;}catch{}
   const result={schema_version:1,generated_at:now,streams:[],checks:[],providers:{},resolutions:[],telemetry:{}};

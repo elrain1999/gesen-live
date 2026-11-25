@@ -12,13 +12,13 @@ on:
   schedule:
     # UTC 15–23 and 00–07 = JST 00–16; UTC 08–14 = JST 17–23.
     - cron: '17 0-7,15-23 * * *'
-    - cron: '7,17,27,37,47,57 8-14 * * *'
+    - cron: '7,22,37,52 8-14 * * *'
     # Extra opportunity on the same scheduler. Collect only when Pages is stale.
     - cron: '32 * * * *'
 permissions:
   contents: read
 concurrency:
-  group: broadcast-snapshot-${{ github.ref_name }}
+  group: broadcast-snapshot-production
   cancel-in-progress: false
 jobs:
   check_backup:
@@ -44,8 +44,11 @@ jobs:
       (needs.check_backup.result != 'skipped' && needs.check_backup.outputs.refresh != 'false'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: write
     outputs:
       deployable: ${{ steps.snapshot.outputs.deployable }}
+      acquired: ${{ steps.acquisition.outcome == 'success' }}
     env:
       CACHE_SCOPE: ${{ github.ref_name }}
       AUTOMATED_COLLECTION: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.cloudflare == true) }}
@@ -69,6 +72,9 @@ jobs:
             data/fetch-state.json
           key: stream-v6-${{ env.CACHE_SCOPE }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: stream-v6-${{ env.CACHE_SCOPE }}-
+      - name: Restore freshest published data
+        if: github.repository == 'elrain1999/gesen-live' && github.ref == 'refs/heads/main'
+        run: node scripts/snapshot-guard.cjs restore
       - name: Check recent automatic collection
         id: recent
         if: env.AUTOMATED_COLLECTION == 'true' && github.repository == 'elrain1999/gesen-live' && github.ref == 'refs/heads/main'
@@ -77,7 +83,13 @@ jobs:
           PUBLISH_PAGES: ${{ vars.PUBLISH_PAGES }}
       - run: npm run probe:auth
         if: env.AUTOMATED_COLLECTION != 'true'
+      - name: Reserve shared search budget
+        if: steps.recent.outputs.mode != 'reuse' && steps.recent.outputs.mode != 'skip'
+        run: node scripts/search-budget.cjs
+        env:
+          GH_TOKEN: ${{ github.token }}
       - run: npm run validate:api
+        id: acquisition
         if: steps.recent.outputs.mode != 'reuse' && steps.recent.outputs.mode != 'skip'
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
@@ -147,6 +159,7 @@ jobs:
           name: api-validation
           path: |
             data/api-validation.json
+            data/search-reservation.json
             artifacts/auth-probe.json
             artifacts/youtube-audit.json
             artifacts/browser-real-data.json
@@ -155,6 +168,9 @@ jobs:
             artifacts/https-preview-browser.json
           retention-days: 1
 
+      - name: Refuse stale publication
+        if: github.ref == 'refs/heads/main' && vars.PUBLISH_PAGES == 'true' && steps.snapshot.outputs.deployable == 'true'
+        run: node scripts/snapshot-guard.cjs publish
       - uses: actions/upload-pages-artifact@v3
         if: github.event.repository.private == false && github.ref == 'refs/heads/main' && vars.PUBLISH_PAGES == 'true' && steps.snapshot.outputs.deployable == 'true'
         with:
@@ -175,3 +191,19 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  acquisition_status:
+    needs: [collect, deploy]
+    if: always() && needs.collect.result == 'success' && needs.collect.outputs.acquired == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: api-validation
+          path: report
+      - name: Report partial acquisition after publication
+        run: node scripts/check-acquisition.cjs
