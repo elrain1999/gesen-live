@@ -11,7 +11,7 @@ on:
     branches: [main]
   schedule:
     # UTC 15–23 and 00–07 = JST 00–16; UTC 08–14 = JST 17–23.
-    - cron: '17 0-7,15-23 * * *'
+    - cron: '10 0-7,15-23 * * *'
     - cron: '7,22,37,52 8-14 * * *'
     # Extra opportunity on the same scheduler. Collect only when Pages is stale.
     - cron: '32 * * * *'
@@ -194,7 +194,7 @@ jobs:
 
   acquisition_status:
     needs: [collect, deploy]
-    if: always() && needs.collect.result == 'success' && needs.collect.outputs.acquired == 'true'
+    if: always() && (needs.collect.result == 'failure' || needs.collect.result == 'cancelled' || needs.collect.outputs.acquired == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -202,8 +202,13 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@v4
+        if: needs.collect.result == 'success'
         with:
           name: api-validation
           path: report
-      - name: Report partial acquisition after publication
+      - name: Report acquisition and publication status
+        if: always()
         run: node scripts/check-acquisition.cjs
+        env:
+          COLLECT_RESULT: ${{ needs.collect.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}

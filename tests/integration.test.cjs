@@ -290,7 +290,7 @@ test('live search uses an existing slot to check for a follow-on broadcast',asyn
 test('scheduled collection and Pages deployment are wired on main',()=>{
  const workflow=fs.readFileSync('.github/workflows/update.yml','utf8');
  const cron=[...workflow.matchAll(/^    - cron: '([^']+)'$/gm)].map(match=>match[1]);
- assert.deepEqual(cron,['17 0-7,15-23 * * *','7,22,37,52 8-14 * * *','32 * * * *']);
+ assert.deepEqual(cron,['10 0-7,15-23 * * *','7,22,37,52 8-14 * * *','32 * * * *']);
  assert.match(workflow,/^  workflow_dispatch:\n    inputs:\n      cloudflare:[\s\S]*?type: boolean\n        default: false/m);
  assert.match(workflow,/^      AUTOMATED_COLLECTION: .*github\.event_name == 'schedule'.*github\.event_name == 'workflow_dispatch' && inputs\.cloudflare == true/m);
  assert.match(workflow,/^  schedule:\n(?:    #.*\n)*    - cron:/m);

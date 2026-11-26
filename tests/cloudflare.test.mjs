@@ -9,7 +9,7 @@ const minute=60000;
 const now=Date.parse('2026-11-24T08:19:00Z');
 const early=Date.parse('2026-11-24T00:47:00Z');
 const eveningCron='4,19,34,49 8-14 * * *';
-const hourlyCron='47 0-7,15-23 * * *';
+const hourlyCron='10 0-7,15-23 * * *';
 const event={cron:eveningCron,scheduledTime:now};
 const dispatchUrl='https://api.github.com/repos/elrain1999/gesen-live/actions/workflows/update.yml/dispatches';
 const token='mock-secret-value';
@@ -46,7 +46,7 @@ test('Wrangler and the Worker accept exactly 45 UTC slots across the JST date bo
     const scheduledTime=start+offset*minute;
     const hour=Math.floor(offset/60),min=offset%60;
     const matches=[hourlyCron,eveningCron].filter(cron=>isScheduledSlot({cron,scheduledTime}));
-    const expected=hour<17?min===47:min%15===4;
+    const expected=hour<17?min===10:min%15===4;
     assert.equal(matches.length,Number(expected));
     count+=matches.length;
   }
@@ -55,7 +55,7 @@ test('Wrangler and the Worker accept exactly 45 UTC slots across the JST date bo
 });
 
 test('freshness permits the next target interval across JST day and evening boundaries',()=>{
-  for(const [checkedAt,maxAge] of [['2026-11-24T07:59:59Z',50],['2026-11-24T08:00:00Z',12],
+  for(const [checkedAt,maxAge] of [['2026-11-24T07:59:59.999Z',50],['2026-11-24T08:00:00Z',12],
     ['2026-11-24T14:59:59Z',12],['2026-11-24T15:00:00Z',50]]){
     const time=Date.parse(checkedAt);
     assert.equal(isRecent(time-(maxAge*minute-1),time),true,checkedAt);
@@ -226,4 +226,47 @@ test('deployment checks stop on missing credentials, inaccessible Worker or inco
   await assert.rejects(checkDeployment('verify',{accountId,token,fetcher:invalid}),/two expected UTC Cron/);
   const unexpected=async()=>({ok:true,json:async()=>({success:true,result:{name:'GITHUB_DISPATCH_TOKEN',type:'plain_text'}})});
   await assert.rejects(checkDeployment('preflight',{accountId,token,fetcher:unexpected}),/registered as a Secret/);
+});
+
+
+test('midnight 00:10 replaces the previous evening observation; same-slot late triggers reuse it',async()=>{
+  const checkedAt=Date.parse('2026-11-26T15:10:00Z');
+  const previous=Date.parse('2026-11-26T14:49:00Z');
+  const mock={...mockNetwork(snapshot(previous)),now:()=>checkedAt};
+  assert.equal(isScheduledSlot({cron:hourlyCron,scheduledTime:checkedAt}),true);
+  assert.equal(isRecent(previous,checkedAt),false);
+  await runScheduled({cron:hourlyCron,scheduledTime:checkedAt},env,mock);
+  assert.equal(mock.calls.filter(c=>c.url===dispatchUrl).length,1);
+  assert.equal(await collectionMode(snapshot(previous),{...mock,publish:true}),'fetch');
+  const completed=checkedAt+1000;
+  for(const first of ['schedule','cloudflare']){
+    const later={...mockNetwork(snapshot(completed)),now:()=>checkedAt+60000,publish:true};
+    assert.equal(await collectionMode(snapshot(completed),later),'skip',first);
+  }
+  assert.equal(isScheduledSlot({cron:hourlyCron,scheduledTime:Date.parse('2026-11-26T15:47Z')}),false);
+});
+
+test('combined Worker, Actions and backup keep 45 collections per JST day without duplicate API work',async()=>{
+  const {checkPublishedSnapshot}=await import('../scripts/check-schedule-backup.cjs');
+  for(const order of [['worker','actions'],['actions','worker']]){
+    const start=Date.parse('2026-11-26T15:00:00Z');
+    let current=snapshot(start-11*minute),finished=start-10*minute,collections=0;
+    let workerSlots=0,actionSlots=0;
+    for(let offset=0;offset<1440;offset++){
+      const time=start+offset*minute,hour=Math.floor(offset/60),min=offset%60;
+      for(const trigger of [...order,'backup']){
+        const scheduled=trigger==='worker'?(hour<17?min===10:min%15===4):trigger==='actions'?(hour<17?min===10:min%15===7):min===32;
+        if(!scheduled)continue;
+        if(trigger==='worker')workerSlots++;
+        if(trigger==='actions')actionSlots++;
+        const clock=Math.max(time,finished);
+        const fetcher=async()=>({ok:true,json:async()=>current});
+        if(trigger==='worker'&&isRecent(Date.parse(current.last_success_at),clock))continue;
+        if(trigger==='backup'&&!(await checkPublishedSnapshot({fetcher,now:()=>clock})).refresh)continue;
+        const mode=await collectionMode(current,{fetcher,now:()=>clock,publish:true});
+        if(mode==='fetch'){collections++;current=snapshot(clock);finished=clock+minute;}
+      }
+    }
+    assert.equal(workerSlots,45);assert.equal(actionSlots,45);assert.equal(collections,45,order.join(','));
+  }
 });
