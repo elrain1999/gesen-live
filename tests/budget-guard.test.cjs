@@ -58,7 +58,7 @@ test('normal 17 hourly and 28 evening slots reserve 73 attempts in one PT day',a
  for(let minute=0;minute<1440;minute++){
   const time=new Date(Date.parse('2026-11-25T08:00:00Z')+minute*60000);
   const hour=new Date(time.getTime()+9*3600000).getUTCHours();
-  if(hour>=17?time.getUTCMinutes()%15===4:time.getUTCMinutes()===47)
+  if(hour>=17?time.getUTCMinutes()%15===4:time.getUTCMinutes()===10)
    total+=(await reserve({...options(mock),now:time.toISOString()})).allowed;
  }
  assert.equal(total,73);assert.equal(mock.state.used,73);
@@ -111,14 +111,4 @@ test('a reservation from yesterday cannot authorize calls after collection start
   const u=new URL(url);routes.push(u.pathname.split('/').pop());return {ok:true,status:200,json:async()=>({items:[]})};
  }});
  assert.ok(!routes.includes('search'));
-});
-
-test('partial/deferred/auth failures and unavailable quota state fail reporting after deployment; planned limits do not',()=>{
- const {incomplete}=require('../scripts/check-acquisition.cjs');
- for(const key of ['api_limit','request_failed','request_deferred','auth_not_configured','authentication_error','channel_id_unresolved'])
-  assert.equal(incomplete({counts:{[key]:1}},{reason:'reserved'}),true);
- assert.equal(incomplete({counts:{}},{reason:'shared_ledger_unavailable'}),true);
- assert.equal(incomplete({counts:{api_success_no_broadcast_in_scanned_window:59}},{reason:'daily_limit'}),false);
- const workflow=fs.readFileSync('.github/workflows/update.yml','utf8');
- assert.match(workflow,/acquisition_status:\n    needs: \[collect, deploy\]/);
 });

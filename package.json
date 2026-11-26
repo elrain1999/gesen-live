@@ -4,7 +4,7 @@
   "version": "0.7.0",
   "scripts": {
     "build": "node scripts/build.cjs && node scripts/check-public-dist.cjs",
-    "test": "node tests/app.test.cjs && node tests/providers.test.cjs && node tests/integration.test.cjs && node tests/audit.test.cjs && node tests/cloudflare.test.mjs && node tests/budget-guard.test.cjs",
+    "test": "node tests/app.test.cjs && node tests/providers.test.cjs && node tests/integration.test.cjs && node tests/audit.test.cjs && node tests/cloudflare.test.mjs && node tests/budget-guard.test.cjs && node tests/acquisition-status.test.cjs",
     "test:browser": "node test.cjs",
     "update": "node scripts/update.cjs",
     "validate:api": "node scripts/validate-api.cjs",

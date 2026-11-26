@@ -1,4 +1,4 @@
-const hourlyCron = '47 0-7,15-23 * * *';
+const hourlyCron = '10 0-7,15-23 * * *';
 const eveningCron = '4,19,34,49 8-14 * * *';
 const dispatchUrl = 'https://api.github.com/repos/elrain1999/gesen-live/actions/workflows/update.yml/dispatches';
 const pagesUrl = 'https://elrain1999.github.io/gesen-live/streams.json';
@@ -13,14 +13,18 @@ export function isScheduledSlot({ cron, scheduledTime }) {
   if (!Number.isFinite(scheduledTime)) return false;
   const minutes = new Date(scheduledTime).getUTCMinutes();
   return jstHour(scheduledTime) < 17
-    ? cron === hourlyCron && minutes === 47
+    ? cron === hourlyCron && minutes === 10
     : cron === eveningCron && minutes % 15 === 4;
 }
 
 // Leave room for runner startup and publishing before the next 60/15-minute slot.
 export function isRecent(time, now) {
   const age = now - time;
-  return age >= 0 && age < (jstHour(now) < 17 ? 50 : 12) * minute;
+  const hourly=jstHour(now)<17;
+  const hourStart=Math.floor(now/(60*minute))*60*minute;
+  const target=hourStart+10*minute-(now<hourStart+10*minute?60*minute:0);
+  // At 00:10, a 23:49 collection must not suppress the new hourly slot.
+  return age>=0&&age<(hourly?50:12)*minute&&(!hourly||time>=target);
 }
 
 export function snapshotTimes(snapshot, now) {
