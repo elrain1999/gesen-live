@@ -4,11 +4,11 @@ const model = require('../dist/model.js');
 
 const input = fs.readFileSync('data/channels.public.json');
 const source = JSON.parse(input);
-const registryHash = 'fdf1fc8851c5a9c9d96e52cd24bd64088e0356cfddd14a47665d7d6358ad1693';
+const registryHash = '00feb852f35a858e8c9ea1ba31ca84d2d8cb64ddf9c6e0ebf327e038e3d09858';
 if (crypto.createHash('sha256').update(input).digest('hex') !== registryHash) throw Error('Public registry changed: review required');
 const channels = model.channels(source);
 const active = model.activeChannels(channels);
-if (source.channels.length !== 70 || channels.length !== 70 || active.length !== 59) throw Error('Platform count mismatch');
+if (source.channels.length !== 70 || channels.length !== 69 || active.length !== 58) throw Error('Platform count mismatch');
 const fixedIds = active.map(c => c.youtube_channel_id).filter(Boolean);
 if (new Set(fixedIds).size !== fixedIds.length) throw Error('Duplicate YouTube channel ID');
 
@@ -31,4 +31,4 @@ const snapshot = {
   streams:model.streams(sourceSnapshot,active).map(s=>fields(s,streamKeys))
 };
 fs.writeFileSync('dist/streams.json',JSON.stringify(snapshot,null,2)+'\n');
-console.log(`Built: ${active.length} active YouTube channels (${channels.length} registry records preserved); adapter Twitch frozen; ${snapshot.streams.length} real stream records`);
+console.log(`Built: ${active.length} active YouTube channels (${source.channels.length} registry records preserved); adapter Twitch frozen; ${snapshot.streams.length} real stream records`);

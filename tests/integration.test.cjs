@@ -7,7 +7,7 @@ const {request}=require('../scripts/providers/http.cjs');
 const {report}=require('../scripts/validate-api.cjs');
 const {checkPublishedSnapshot}=require('../scripts/check-schedule-backup.cjs');
 const {production,now,stream}=require('./helpers.cjs');
-const all=production().channels, yt=all.find(c=>c.youtube_channel_id),tw=all.find(c=>c.platform==='Twitch');
+const all=require('../dist/model.js').channels(production()), yt=all.find(c=>c.youtube_channel_id),tw=all.find(c=>c.platform==='Twitch');
 const reply=(data,status=200,headers={})=>({ok:status>=200&&status<300,status,headers:{get:key=>headers[key]??null},json:async()=>data});
 const metadata={items:[{id:yt.youtube_channel_id,contentDetails:{relatedPlaylists:{uploads:'u'}}}]};
 test('YouTube search quota does not discard successfully fetched archives or repeatedly consume failed searches',async()=>{
@@ -105,8 +105,8 @@ test('Twitch user missing is channel unavailable; missing schedule differs from 
 });
 test('update uses isolated data directory, handles corrupt cache and records every approval without auth',async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'retro-ring-'));
- try{fs.writeFileSync(path.join(dir,'streams.json'),'{bad');const r=await main({dataDir:dir,now,env:{}});assert.equal(r.checks.length,59*3);assert.equal(r.streams.length,0);assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'streams.json'))).schema_version,1);
- const v=report(r,all);assert.equal(v.channels.length,59);assert.equal(v.counts.auth_not_configured,177);assert.equal(v.channels.filter(c=>c.identifier==='fixed_id_unresolved').length,10);
+ try{fs.writeFileSync(path.join(dir,'streams.json'),'{bad');const r=await main({dataDir:dir,now,env:{}});assert.equal(r.checks.length,58*3);assert.equal(r.streams.length,0);assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'streams.json'))).schema_version,1);
+ const v=report(r,all);assert.equal(v.channels.length,58);assert.equal(v.counts.auth_not_configured,174);assert.equal(v.channels.filter(c=>c.identifier==='fixed_id_unresolved').length,9);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 test('report separates API limit, auth error, channel issue, identity unresolved and successful empty window',()=>{
@@ -356,4 +356,16 @@ test('Actions logs count deferred live channels separately and redact untrusted 
  assert.equal(events.length,2);
  assert.ok(events.every(e=>e.reason===null&&e.retry_after_present));
  assert.ok(!logs.join('\n').includes(secret));
+});
+
+test('production collection excludes nen0211 and removes only its cached records',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nen-exclusion-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const excluded=production().channels.find(c=>c.youtube_handle==='@nen0211');
+ fs.writeFileSync(path.join(dir,'streams.json'),JSON.stringify({generated_at:now,streams:[stream(excluded,{id:'excluded-video'}),stream(yt,{id:'approved-video'})]}));
+ let seen;
+ const result=await main({dataDir:dir,now,env:{},collectors:{YouTube:{collect:async channels=>{
+  seen=channels;return {streams:[],checks:[],provider:{status:'not_configured'}};
+ }}}});
+ assert.equal(seen.length,58);assert.ok(!seen.some(c=>c.youtube_handle==='@nen0211'));
+ assert.deepEqual(result.streams.map(s=>s.id),['approved-video']);
 });
