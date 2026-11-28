@@ -6,11 +6,13 @@ const M=require('../dist/model.js');
 const {production,now,stream}=require('./helpers.cjs');
 const source=production(), registered=M.channels(source), channel=registered[0];
 test('production population and excluded IDs; multiple channels stay separate',()=>{
-  assert.equal(registered.length,70);
-  assert.equal(registered.filter(c=>c.platform==='YouTube').length,59);
+  assert.equal(registered.length,69);
+  assert.equal(registered.filter(c=>c.platform==='YouTube').length,58);
   assert.equal(registered.filter(c=>c.platform==='Twitch').length,11);
-  assert.equal(registered.filter(c=>c.platform==='YouTube'&&!c.youtube_channel_id).length,10);
-  assert.equal(M.channels({...source,channels:[...source.channels,{...channel,record_id:'hold',status:'on_hold'},{...channel,record_id:'reject',status:'excluded'}]}).length,70);
+  assert.equal(registered.filter(c=>c.platform==='YouTube'&&!c.youtube_channel_id).length,9);
+  assert.equal(M.channels({...source,channels:[...source.channels,{...channel,record_id:'hold',status:'on_hold'},{...channel,record_id:'reject',status:'excluded'}]}).length,69);
+  assert.equal(source.channels.find(c=>c.youtube_handle==='@nen0211').status,'excluded');
+  assert.ok(!registered.some(c=>c.youtube_handle==='@nen0211'));
   const will=registered.filter(c=>c.display_name.includes('WILL'));assert.ok(will.length>=2);
   assert.equal(new Set(will.map(c=>c.record_id)).size,will.length);
 });
@@ -91,4 +93,19 @@ test('combined filters search channel associations without changing input',()=>{
   assert.ok(M.matches(fixture,'',fixture.platform,'対戦会場'));
   assert.equal(M.matches(channel,'','Twitch',''),false);
   assert.equal(JSON.stringify(registered),before);
+});
+
+test('published period wording matches the existing archive/expiry logic; future schedules have no 14-day bound',()=>{
+  const at=Date.parse(now),day=86400000;
+  const archive=starts=>stream(channel,{status:'archive',starts_at:new Date(starts).toISOString(),ends_at:now});
+  assert.equal(M.streams({streams:[archive(at-30*day)]},registered,at).length,1);
+  assert.equal(M.streams({streams:[archive(at-30*day-1)]},registered,at).length,0);
+  assert.equal(M.streams({streams:[stream(channel,{status:'upcoming',starts_at:new Date(at+15*day).toISOString()})]},registered,at).length,1);
+  assert.equal(M.streams({streams:[archive(at-day)]},registered,at+day+1).length,0);
+  const about=fs.readFileSync('dist/about.html','utf8');
+  assert.match(about,/17:00〜23:59は15分/);assert.match(about,/配信開始から過去30日/);assert.doesNotMatch(about,/14日/);
+});
+test('approved channels retain all game titles without a blanket exclusion filter',()=>{
+  const rows=['麻雀','シューティング','パズル','ガンダムEXVS','英傑大戦'].map((title,i)=>stream(channel,{id:'allowed-'+i,title}));
+  assert.equal(M.streams({streams:rows},registered,Date.parse(now)).length,rows.length);
 });
